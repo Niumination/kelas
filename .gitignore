@@ -20,3 +20,4 @@ tsconfig.tsbuildinfo
 
 # PDF uji dari Supabase nyata (berisi nomor sertifikat khusus lingkungan uji)
 docs/uji-sertifikat.pdf
+.env*
