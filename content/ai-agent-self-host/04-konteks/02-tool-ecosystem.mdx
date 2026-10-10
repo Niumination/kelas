@@ -1,0 +1,367 @@
+---
+judul: Tool ecosystem & MCP — menambah kemampuan tanpa menulis ulang
+ringkasan: Cara merancang lapisan tool supaya menambah kemampuan baru tidak berarti menyentuh kode agent, plus kapan sebuah tool sebaiknya tidak dibuat.
+menit: 26
+urutan: 2
+tags: [tool, MCP, arsitektur, berbayar, python]
+---
+
+Setiap kali kamu menambah tool dengan cara menyunting loop agent, kamu menambah risiko pada kode yang sudah berjalan. Pelajaran ini memindahkan tool ke luar loop, supaya menambah kemampuan baru cukup dengan menambah satu berkas.
+
+## Gejala desain tool yang salah
+
+Kalau kamu mendapati diri menambah tool dengan cara menyalin blok `if nama == "tool_baru"` di dalam loop agent setiap kali ada kebutuhan baru, berarti lapisan tool-mu belum ada. Gejalanya bisa ditebak:
+
+- berkas `agent.py` terus memanjang dan semakin sulit dibaca
+- menambah tool berarti mengubah kode yang sudah berjalan
+- tidak ada cara mematikan satu tool tanpa menyentuh kode
+
+Desain yang lebih baik memisahkan tiga hal: **deklarasi** (apa tool ini dan bagaimana memanggilnya), **registrasi** (kapan ia boleh dipakai), dan **eksekusi** (apa yang ia lakukan).
+
+```
+deklarasi   →  skema JSON yang dibaca model
+registrasi  →  daftar tool aktif + tingkat izin
+eksekusi    →  fungsi yang benar-benar jalan
+```
+
+Dengan pemisahan ini, menambah tool adalah menambah satu berkas, bukan menyunting loop.
+
+## Registry: satu tempat untuk deklarasi, izin, dan validasi
+
+```python
+# registry.py
+from dataclasses import dataclass, field
+from enum import IntEnum
+from typing import Callable, Any
+import inspect
+
+
+class Izin(IntEnum):
+    BACA = 1        # membaca, tidak mengubah apa pun
+    TULIS = 2       # mengubah keadaan di dalam ruang kerja
+    BERBAHAYA = 3   # bisa merusak sistem atau menghabiskan uang
+
+
+@dataclass
+class Tool:
+    nama: str
+    fungsi: Callable
+    deskripsi: str
+    izin: Izin
+    skema: dict = field(default_factory=dict)   # JSON Schema parameter
+    aktif: bool = True
+
+    def skema_json(self) -> dict:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.nama,
+                "description": self.deskripsi,
+                "parameters": self.skema,
+            },
+        }
+
+
+class Registry:
+    def __init__(self) -> None:
+        self._tool: dict[str, Tool] = {}
+
+    def daftar(self, nama: str, deskripsi: str, izin: Izin,
+               skema: dict | None = None, aktif: bool = True):
+        def bungkus(fungsi):
+            if not fungsi.__doc__:
+                raise ValueError(f"tool {nama} wajib punya docstring")
+            self._tool[nama] = Tool(
+                nama=nama, fungsi=fungsi, deskripsi=deskripsi, izin=izin,
+                skema=skema or _skema_dari_tipe(fungsi), aktif=aktif)
+            return fungsi
+        return bungkus
+
+    def aktif(self, maks_izin: Izin = Izin.TULIS) -> list[Tool]:
+        return [t for t in self._tool.values()
+                if t.aktif and t.izin <= maks_izin]
+
+    def skema_untuk_model(self, maks_izin: Izin = Izin.TULIS) -> list[dict]:
+        return [t.skema_json() for t in self.aktif(maks_izin)]
+
+    def panggil(self, nama: str, argumen: dict,
+                maks_izin: Izin = Izin.TULIS) -> Any:
+        tool = self._tool.get(nama)
+        if tool is None:
+            raise KeyError(f"tool tidak dikenal: {nama}")
+        if not tool.aktif:
+            raise PermissionError(f"tool nonaktif: {nama}")
+        if tool.izin > maks_izin:
+            raise PermissionError(
+                f"tool {nama} butuh izin {tool.izin.name}, "
+                f"batas sesi ini {maks_izin.name}")
+
+        # Validasi: hanya argumen yang dikenal fungsinya yang diteruskan.
+        # Argumen liar dari model dibuang, bukan diteruskan diam-diam.
+        tanda = inspect.signature(tool.fungsi)
+        sah = {k: v for k, v in argumen.items() if k in tanda.parameters}
+        return tool.fungsi(**sah)
+```
+
+Dua hal di atas yang paling sering dianggap berlebihan padahal tidak:
+
+- **`Izin` ditegakkan di `panggil`, bukan di prompt.** Session yang tidak punya izin `TULIS` tidak bisa memanggil tool tulis meski model memintanya. Ini satu-satunya bentuk pembatasan yang tidak bisa dibujuk.
+- **Filter `sah` pada argumen.** Model bisa saja mengirim argumen tambahan yang tidak ada di tanda tangan fungsi; tanpa filter, Python melempar `TypeError` yang tidak informatif. Dengan filter, argumen liar dibuang dan fungsi tetap jalan.
+
+## Autodiscovery: memuat tool dari direktori
+
+```python
+# alat/__init__.py
+import importlib
+import pkgutil
+
+registry = None   # diisi oleh muat()
+
+
+def muat(reg) -> list[str]:
+    """Impor semua modul di paket `alat`, sehingga dekorator @daftar berjalan."""
+    global registry
+    registry = reg
+    dimuat = []
+    for modul in pkgutil.iter_modules(__path__):
+        importlib.import_module(f"{__name__}.{modul.name}")
+        dimuat.append(modul.name)
+    return dimuat
+```
+
+```python
+# alat/berkas.py
+import os
+from registry import Izin
+
+AKAR = os.path.abspath("./ruang-kerja")
+
+
+def _aman(jalur: str) -> str | None:
+    penuh = os.path.abspath(os.path.join(AKAR, jalur))
+    return penuh if penuh.startswith(AKAR + os.sep) else None
+
+
+@__import__("alat").registry.daftar(
+    nama="baca_berkas",
+    deskripsi="Membaca isi berkas teks di ruang kerja.",
+    izin=Izin.BACA,
+    skema={"type": "object",
+           "properties": {"jalur": {"type": "string",
+                                    "description": "Jalur relatif berkas."}},
+           "required": ["jalur"]},
+)
+def baca_berkas(jalur: str) -> str:
+    """Baca berkas di dalam ruang kerja."""
+    penuh = _aman(jalur)
+    if penuh is None:
+        raise PermissionError("jalur di luar ruang kerja")
+    with open(penuh, "r", encoding="utf-8", errors="replace") as f:
+        return f.read(8000)
+```
+
+Pola `__import__("alat").registry` di atas berfungsi, tapi tidak enak dibaca. Cara yang lebih rapi: simpan registry di modul tersendiri yang bisa diimpor balik.
+
+```python
+# alat/berkas.py — versi yang lebih bersih
+from registry import Izin, dapatkan_registry
+
+reg = dapatkan_registry()
+
+
+@reg.daftar(
+    nama="baca_berkas",
+    deskripsi="Membaca isi berkas teks di ruang kerja.",
+    izin=Izin.BACA,
+    skema={"type": "object",
+           "properties": {"jalur": {"type": "string",
+                                    "description": "Jalur relatif berkas."}},
+           "required": ["jalur"]},
+)
+def baca_berkas(jalur: str) -> str:
+    """Baca berkas di dalam ruang kerja."""
+    ...
+```
+
+Tambahkan dua baris ini ke `registry.py`:
+
+```python
+# registry.py (tambahan)
+_registry = None
+
+def pasang(reg: "Registry") -> None:
+    global _registry
+    _registry = reg
+
+def dapatkan_registry() -> "Registry":
+    if _registry is None:
+        raise RuntimeError("Registry belum dipasang. Panggil pasang() dulu.")
+    return _registry
+```
+
+Sekarang alurnya: `pasang(Registry())` → `alat.muat(reg)` → `reg.skema_untuk_model(Izin.TULIS)`. Menambah tool berarti menaruh satu berkas baru di `alat/`. Loop agent tidak pernah disentuh.
+
+## Berapa banyak tool yang terlalu banyak
+
+Aturan praktisnya: **akurasi pemilihan tool menurun sebelum jumlahnya mencapai sepuluh**, dan pada model 7B penurunannya mulai terasa di kisaran lima sampai tujuh.
+
+Tiga strategi kalau jumlah tool-mu mulai mendekati itu:
+
+1. **Kelompokkan.** Satu tool `kelola_berkas` dengan parameter `aksi: baca|tulis|hapus` sering lebih mudah dipilih model daripada tiga tool terpisah.
+2. **Rutekan.** Agent pertama memilih *kategori*, agent kedua memilih tool di dalam kategori itu. Ini persisnya pola supervisor/worker dari modul B2, diterapkan pada pemilihan tool.
+3. **Sembunyikan.** Tool yang hanya dipakai dalam satu alur tidak perlu muncul di prompt utama — muat ia hanya ketika alur itu aktif.
+
+Strategi ketiga yang paling sering terlupakan, dan seringkali yang paling efektif: **tool yang muncul di prompt adalah tool yang bisa salah dipilih.**
+
+## Menangani tool yang gagal
+
+Kegagalan tool itu pasti. Yang menentukan adalah bagaimana sistemmu menyikapinya.
+
+```python
+# gagal.py
+import time
+from registry import Izin
+
+
+class GagalSementara(Exception):
+    """Kegagalan yang masuk akal untuk dicoba lagi: timeout, 429, 503."""
+
+
+class GagalPermanen(Exception):
+    """Kegagalan yang tidak akan berubah meski dicoba lagi."""
+
+
+def dengan_retry(tool, argumen: dict, maks: int = 3) -> str:
+    for percobaan in range(maks):
+        try:
+            return str(tool.panggil(tool.nama, argumen))
+        except GagalPermanen as e:
+            # Jangan habiskan waktu: gagalnya tidak akan hilang.
+            return f"GAGAL permanen: {e}"
+        except GagalSementara as e:
+            if percobaan == maks - 1:
+                return f"GAGAL setelah {maks} percobaan: {e}"
+            time.sleep(2 ** percobaan)     # 1s, 2s, 4s
+    return "GAGAL: batas percobaan"
+
+
+def klasifikasi(e: Exception) -> type[Exception]:
+    """Pisahkan kegagalan sementara dari yang permanen."""
+    teks = f"{type(e).__name__}: {e}".lower()
+    if any(k in teks for k in ("timeout", "429", "503", "connection", "sementara")):
+        return GagalSementara
+    if any(k in teks for k in ("permission", "notfound", "keyerror", "value")):
+        return GagalPermanen
+    return GagalSementara      # kalau ragu, coba ulang sekali
+```
+
+Tiga aturan yang kupegang:
+
+- **Bedakan sementara dan permanen.** Mencoba ulang `PermissionError` hanya membuang waktu; tidak mencoba ulang `timeout` membuang pekerjaan.
+- **Batasi jumlah percobaan, dan beri jeda yang naik.** Tiga percobaan dengan jeda 1–2–4 detik menangani hampir semua kegagalan sementara.
+- **Kembalikan pesan errornya ke model, dalam bentuk yang bisa dibacanya.** `GAGAL: berkas tidak ada: laporan.md` jauh lebih berguna daripada `GAGAL` saja — model sering bisa memperbaiki argumennya sendiri.
+
+<Callout tipe="peringatan" judul="Retry tanpa batas pada tool berbayar">
+Mencoba ulang tool yang memanggil API berbayar bisa menggandakan tagihan tanpa kamu sadari. Kalau tool punya efek samping yang mahal, **batasi retry sampai satu kali**, dan simpan hasil panggilan yang berhasil supaya percobaan ulang tidak mengulang pekerjaan yang sudah selesai.
+
+Aturan umum: retry bebas untuk tool `Izin.BACA`, hati-hati untuk `Izin.TULIS`, dan jangan pernah otomatis untuk `Izin.BERBAHAYA`.
+</Callout>
+
+## Kapan sebuah tool sebaiknya tidak dibuat
+
+Pertanyaan yang jarang ditanyakan padahal paling menghemat waktu. Tool tidak layak dibuat kalau:
+
+- model bisa melakukannya sendiri dengan cukup baik (format tanggal, hitung sederhana)
+- ia hanya boleh dipakai sekali seumur hidup sistem
+- gagalnya tidak bisa dideteksi — tool yang gagalnya diam-diam lebih berbahaya daripada tidak ada tool
+- ia memberikan akses yang lebih luas daripada yang benar-benar dibutuhkan tugasnya
+
+Baris terakhir itu yang paling sering dilanggar. Tool `jalankan_sql(query)` memberi model akses ke seluruh database, padahal yang dibutuhkan mungkin hanya `cari_pesanan(nomor)`.
+
+## Tentang MCP
+
+Model Context Protocol (MCP) adalah cara baku bagi server untuk menawarkan tool, sumber data, dan templat prompt kepada klien. Nilainya: tool yang ditulis satu kali bisa dipakai klien yang berbeda-beda.
+
+Yang perlu kamu pahami sebelum ikut-ikutan:
+
+- **MCP menstandarkan cara *menemukan dan memanggil* tool, bukan cara mengamankannya.** Klasifikasi izin tetap tanggung jawabmu.
+- Server MCP adalah proses lain yang harus kamu jalankan, pantau, dan perbarui. Untuk sistem kecil dengan lima tool, menulis fungsi sendiri sering lebih sederhana.
+- MCP paling masuk akal kalau kamu ingin **berbagi** tool dengan orang lain, atau memakai tool yang sudah ditulis orang lain.
+
+### Menjalankan server MCP dan menyambungkannya
+
+```python
+# mcp_klien.py
+import json
+import subprocess
+
+
+class ServerMcp:
+    """Klien MCP minimal: cukup untuk memanggil tool lewat stdio."""
+
+    def __init__(self, perintah: list[str]):
+        self.proses = subprocess.Popen(
+            perintah, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, text=True, bufsize=1)
+        self._id = 0
+
+    def _kirim(self, metode: str, params: dict) -> dict:
+        self._id += 1
+        self.proses.stdin.write(
+            json.dumps({"jsonrpc": "2.0", "id": self._id,
+                        "method": metode, "params": params}) + "\n")
+        self.proses.stdin.flush()
+        while True:
+            baris = self.proses.stdout.readline()
+            if not baris:
+                raise RuntimeError("server MCP berhenti")
+            pesan = json.loads(baris)
+            if pesan.get("id") == self._id:
+                return pesan
+
+    def daftar_tool(self) -> list[dict]:
+        return self._kirim("tools/list", {})["result"]["tools"]
+
+    def panggil(self, nama: str, argumen: dict) -> str:
+        hasil = self._kirim("tools/call", {"name": nama, "arguments": argumen})
+        if "error" in hasil:
+            raise RuntimeError(hasil["error"]["message"])
+        return hasil["result"]["content"][0]["text"]
+
+    def tutup(self) -> None:
+        self.proses.terminate()
+```
+
+<Callout tipe="bahaya" judul="Server MCP pihak ketiga adalah kode orang lain yang berjalan di mesinmu">
+Sebelum menyambungkan server MCP dari repositori yang belum kamu baca:
+
+- **Baca kodenya**, terutama bagian yang menyentuh jaringan dan sistem berkas.
+- **Jalankan dengan izin terbatas** — pengguna sistem sendiri, direktori kerja sendiri, tanpa akses ke kunci API-mu.
+- **Batasi tool yang diekspos.** Daftar tool dari server pihak ketiga sebaiknya disaring manual, tidak langsung diteruskan ke model.
+- **Anggap setiap tool sebagai `Izin.BERBAHAYA` sampai kamu tahu persis apa yang ia lakukan.**
+
+MCP mempermudah *menemukan* tool. Ia tidak membuat tool itu lebih aman.
+</Callout>
+
+<Terminal perintah="python -c 'from registry import Registry, Izin; import alat; r = Registry(); alat.muat(r); print([t.nama for t in r.aktif(Izin.TULIS)])'">
+<div className="text-redup">  ['baca_berkas', 'tulis_berkas', 'cari_dokumen']</div>
+</Terminal>
+
+Kalau tool baru tidak muncul di daftar itu, tiga kemungkinannya berurutan: dekorator `@reg.daftar` tidak dieksekusi (modul tidak ikut terimpor), `izin`-nya di atas batas sesi, atau `aktif=False`.
+
+<Tugas ke="8">
+Tambahkan **dua tool baru** ke agent-mu tanpa menyunting loop agent sama sekali:
+
+1. `cari_dokumen(kata_kunci)` — memakai retrieval dari pelajaran B3, mengembalikan tiga potongan teratas beserta penandanya. Izin: `BACA`.
+2. `catat_keputusan(isi)` — menambahkan satu baris ke `log/keputusan.md` dengan cap waktu. Izin: `TULIS`.
+
+Syaratnya: keduanya hidup di `alat/` sebagai berkas terpisah, dan terbaca otomatis oleh `alat.muat(reg)`.
+
+Lalu buktikan pemisahan izinnya bekerja: jalankan sesi dengan `maks_izin=Izin.BACA` dan pastikan `catat_keputusan` **ditolak di kode**, bukan sekadar tidak dipanggil model. Tunjukkan pesan `PermissionError`-nya.
+
+Terakhir, jawab dengan jujur untuk masing-masing tool: apakah gagalnya bisa dideteksi? Kalau tidak, tool itu lebih berbahaya daripada tidak ada — pikirkan ulang sebelum mempertahankannya.
+</Tugas>
+
+Modul Konteks selesai. Kerjakan kuis modul ini sebelum lanjut — retrieval dan registry adalah dua hal yang paling sering diuji saat sistemmu mulai dipakai orang lain.
+
+Selanjutnya: agent-mu sudah pintar dan berpengetahuan. Yang tersisa adalah memastikannya aman dan bisa dipertanggungjawabkan saat dijalankan orang lain.

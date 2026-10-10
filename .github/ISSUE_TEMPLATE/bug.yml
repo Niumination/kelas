@@ -1,0 +1,51 @@
+name: Laporan bug
+description: Ada yang rusak di platform kelas
+title: '[Bug] '
+labels: ['bug']
+body:
+  - type: textarea
+    id: ringkasan
+    attributes:
+      label: Apa yang terjadi?
+    validations:
+      required: true
+
+  - type: textarea
+    id: ulang
+    attributes:
+      label: Langkah mengulang
+      placeholder: |
+        1. Buka /belajar/...
+        2. Klik ...
+        3. Muncul ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: harapan
+    attributes:
+      label: Yang seharusnya terjadi
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Halaman materi
+        - Login / akun
+        - Pembayaran
+        - Kuis
+        - Sertifikat
+        - Lainnya
+    validations:
+      required: true
+
+  - type: textarea
+    id: catatan
+    attributes:
+      label: Catatan tambahan
+      description: |
+        Kalau bug-nya menyangkut keamanan akses (materi berbayar bisa dibaca tanpa bayar),
+        tandai ini sebagai keamanan: sebutkan bahwa ini prioritas tertinggi.

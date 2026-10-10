@@ -1,0 +1,214 @@
+@import "tailwindcss";
+
+@theme {
+  --color-latar: #08090b;
+  --color-panel: #0e1014;
+  --color-panel-2: #14171d;
+  --color-tepian: #1f242c;
+  --color-teks: #e7eaee;
+  --color-redup: #98a1ac;
+  --color-hijau: #4ade80;
+  --color-hijau-gelap: #16a34a;
+  --color-biru: #38bdf8;
+  --color-kuning: #fbbf24;
+  --color-merah: #f87171;
+
+  --font-mono: ui-monospace, "SFMono-Regular", "JetBrains Mono", "Menlo", "Consolas", monospace;
+}
+
+* {
+  border-color: var(--color-tepian);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: var(--color-latar);
+  color: var(--color-teks);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  line-height: 1.65;
+}
+
+::selection {
+  background: rgba(74, 222, 128, 0.25);
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* ── Utilitas ─────────────────────────────────────────────── */
+.mono {
+  font-family: var(--font-mono);
+  font-variant-ligatures: none;
+}
+
+.kotak {
+  border: 1px solid var(--color-tepian);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0));
+  border-radius: 0.75rem;
+}
+
+.kotak-hover {
+  transition: border-color 0.18s ease, background-color 0.18s ease, transform 0.18s ease;
+}
+.kotak-hover:hover {
+  border-color: rgba(74, 222, 128, 0.45);
+  background-color: rgba(74, 222, 128, 0.04);
+  transform: translateY(-1px);
+}
+
+.teks-gradien {
+  background: linear-gradient(100deg, #e7eaee 10%, #4ade80 55%, #38bdf8 95%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* ── Isi materi (MDX) ─────────────────────────────────────── */
+.isi {
+  max-width: 72ch;
+  font-size: 1.0625rem;
+}
+.isi h1 {
+  font-size: 1.9rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0 0 0.5rem;
+  line-height: 1.25;
+}
+.isi h2 {
+  font-size: 1.4rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  margin: 2.75rem 0 0.75rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--color-tepian);
+}
+.isi h3 {
+  font-size: 1.13rem;
+  font-weight: 620;
+  margin: 2rem 0 0.6rem;
+}
+.isi h4 {
+  font-size: 1rem;
+  font-weight: 620;
+  margin: 1.5rem 0 0.5rem;
+  color: var(--color-redup);
+}
+.isi p {
+  margin: 1rem 0;
+  color: #cfd5dd;
+}
+.isi ul,
+.isi ol {
+  margin: 1rem 0;
+  padding-left: 1.35rem;
+  color: #cfd5dd;
+}
+.isi ul {
+  list-style: disc;
+}
+.isi ol {
+  list-style: decimal;
+}
+.isi li {
+  margin: 0.4rem 0;
+}
+.isi li::marker {
+  color: var(--color-hijau);
+}
+.isi strong {
+  color: #f2f5f8;
+  font-weight: 650;
+}
+.isi a {
+  color: var(--color-biru);
+  text-decoration: underline;
+  text-decoration-color: rgba(56, 189, 248, 0.4);
+  text-underline-offset: 3px;
+}
+.isi a:hover {
+  text-decoration-color: var(--color-biru);
+}
+.isi blockquote {
+  border-left: 3px solid var(--color-hijau);
+  padding: 0.15rem 0 0.15rem 1rem;
+  margin: 1.5rem 0;
+  color: var(--color-redup);
+  font-style: italic;
+}
+.isi hr {
+  border: 0;
+  border-top: 1px solid var(--color-tepian);
+  margin: 2.5rem 0;
+}
+.isi table {
+  width: 100%;
+  margin: 1.5rem 0;
+  border-collapse: collapse;
+  font-size: 0.9375rem;
+  display: block;
+  overflow-x: auto;
+}
+.isi th,
+.isi td {
+  border: 1px solid var(--color-tepian);
+  padding: 0.55rem 0.8rem;
+  text-align: left;
+}
+.isi th {
+  background: var(--color-panel-2);
+  font-weight: 620;
+}
+.isi code {
+  font-family: var(--font-mono);
+  font-size: 0.875em;
+  background: var(--color-panel-2);
+  border: 1px solid var(--color-tepian);
+  padding: 0.1rem 0.35rem;
+  border-radius: 0.35rem;
+  color: #d7f7e4;
+}
+.isi pre {
+  background: #0b0d11;
+  border: 1px solid var(--color-tepian);
+  border-radius: 0.7rem;
+  padding: 1rem 1.1rem;
+  margin: 1.4rem 0;
+  overflow-x: auto;
+  font-size: 0.875rem;
+  line-height: 1.7;
+}
+.isi pre code {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: #d5dae2;
+  font-size: inherit;
+}
+.isi img {
+  border-radius: 0.6rem;
+  border: 1px solid var(--color-tepian);
+  margin: 1.5rem 0;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-latar);
+}
+::-webkit-scrollbar-thumb {
+  background: #23282f;
+  border-radius: 6px;
+  border: 2px solid var(--color-latar);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #333a44;
+}

@@ -1,0 +1,7 @@
+{
+  "slug": "orkestrasi",
+  "judul": "Orkestrasi multi-agent",
+  "urutan": 3,
+  "ringkasan": "Satu agent cukup untuk satu tugas. Untuk pekerjaan nyata, kamu butuh pembagian peran: observer, planner, executor, verifier — dan aturan kapan mereka saling serah tugas.",
+  "akses": "berbayar"
+}

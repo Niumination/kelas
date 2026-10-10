@@ -1,0 +1,202 @@
+---
+judul: Ollama 101 — pasang, pilih model, ukur
+ringkasan: Instalasi di Linux/macOS/Windows, cara memilih model dan tingkat kuantisasi yang cocok dengan RAM/GPU-mu, plus mengukur kecepatan nyata sebelum kamu berjanji apa pun pada pengguna.
+menit: 32
+urutan: 2
+tags: [ollama, instalasi, model, pengukuran]
+---
+
+Ollama menyederhanakan satu hal yang dulu menyiksa: menjalankan model LLM lokal tanpa menyusun lingkungan Python, CUDA, dan dependensi yang saling bertengkar. Ia membungkus model, bobot, dan server API jadi satu perintah.
+
+## 1. Pasang
+
+<Terminal perintah="curl -fsSL https://ollama.com/install.sh | sh">
+</Terminal>
+
+Itu untuk Linux dan macOS. Setelah selesai, pastikan servisnya hidup:
+
+<Terminal perintah="ollama --version && systemctl is-active ollama">
+<div className="text-redup">ollama version is 0.x.x</div>
+<div className="text-redup">active</div>
+</Terminal>
+
+Kalau servisnya tidak aktif:
+
+<Terminal perintah="sudo systemctl enable --now ollama">
+</Terminal>
+
+**Windows:** unduh penginstal dari `ollama.com/download`, jalankan, lalu buka PowerShell baru.
+
+**Docker** (berguna untuk server, bukan laptop):
+
+<Terminal perintah="docker run -d --gpus=all -v ollama:/root/.ollama -p 11434:11434 --name ollama ollama/ollama">
+</Terminal>
+
+<Callout tipe="tips" judul="Cek dulu apakah GPU-mu kepakai">
+Jalankan `ollama ps` setelah menarik dan menjalankan model. Kolom **Processor** akan menunjukkan `100% GPU`, sebagian GPU, atau `100% CPU`. Kalau GPU-mu ada tapi kolomnya CPU, masalahnya hampir selalu driver CUDA/ROCm yang belum terpasang — bukan Ollama.
+</Callout>
+
+## 2. Pilih model — ini bagian yang paling sering salah
+
+Ukuran model ditulis dalam miliaran parameter: 3B, 7B, 8B, 14B, 70B. Angka itu bukan "kepintaran"; ia adalah **perkiraan beban memori**. Aturan praktisnya:
+
+| Kuantisasi | Memori per 1B parameter | Contoh: model 8B |
+|---|---|---|
+| Q4_K_M (default Ollama) | ~0,6 GB | ~4,9 GB |
+| Q5_K_M | ~0,7 GB | ~5,7 GB |
+| Q8_0 | ~0,9 GB | ~7,2 GB |
+| FP16 (tanpa kuantisasi) | ~2,0 GB | ~16 GB |
+
+Tambahkan sekitar 1–2 GB untuk konteks dan overhead. Maka:
+
+- **RAM 8 GB** → nyaman untuk model 3B–7B di Q4. Jangan mencoba 14B.
+- **RAM 16 GB** → model 8B di Q4 berjalan lancar; 14B masih mungkin tapi akan mengorbankan kecepatan.
+- **RAM 32 GB + GPU 12 GB** → 14B–32B mulai realistis.
+- **GPU 24 GB** → model 32B di Q4 bisa masuk.
+
+<Callout tipe="peringatan" judul="VRAM dan RAM itu berbeda, dan sistem akan diam-diam memakai keduanya">
+Kalau modelnya melebihi VRAM, Ollama akan membagi: sebagian lapisan di GPU, sisanya di RAM. Hasilnya: tetap jalan, tapi kecepatannya bisa turun 5–10 kali lipat. Ini sumber utama keluhan "kok lambat sekali padahal punya GPU".
+</Callout>
+
+### Tarik dan jalankan
+
+<Terminal perintah="ollama pull qwen2.5:7b-instruct-q4_K_M">
+</Terminal>
+
+Pilihan model yang ramah untuk mulai, terutama untuk teks Indonesia:
+
+| Model | Ukuran | Catatan |
+|---|---|---|
+| `qwen2.5:7b-instruct` | ~4,7 GB | Sangat kuat untuk bahasa Indonesia dibanding kelas ukurannya; pilihan aman untuk mulai |
+| `llama3.1:8b-instruct` | ~4,9 GB | Bahasa Inggris terbaik di kelasnya, Indonesia cukup |
+| `gemma2:9b` | ~5,4 GB | Bagus untuk ringkasan dan instruksi terstruktur |
+| `qwen2.5-coder:7b` | ~4,7 GB | Khusus kode; bukan untuk percakapan umum |
+| `nomic-embed-text` | ~270 MB | Bukan untuk mengobrol — untuk embedding (modul B3) |
+
+Jalankan sebentar untuk memastikan semuanya hidup:
+
+<Terminal perintah="ollama run qwen2.5:7b-instruct-q4_K_M">
+<div className="text-redup">&gt;&gt;&gt; Jelaskan apa itu kuantisasi dalam dua kalimat.</div>
+<div>...</div>
+</Terminal>
+
+Ketik `/bye` untuk keluar.
+
+## 3. Pakai lewat API, bukan hanya obrolan
+
+Bagian yang akan kamu pakai sepanjang kelas ini adalah server HTTP-nya, yang otomatis hidup di port `11434`.
+
+<Terminal perintah="curl http://localhost:11434/api/generate -d '{
+  &quot;model&quot;: &quot;qwen2.5:7b-instruct&quot;,
+  &quot;prompt&quot;: &quot;Sebutkan tiga alasan memilih model lokal.&quot;,
+  &quot;stream&quot;: false
+}'">
+</Terminal>
+
+Untuk percakapan multi-giliran, pakai endpoint `/api/chat` dengan daftar `messages`. Perbedaan pentingnya:
+
+- `/api/generate` — satu prompt, satu jawaban. Cocok untuk tugas sekali jalan: ringkas, klasifikasi, ekstraksi.
+- `/api/chat` — menyimpan giliran. Cocok untuk asisten, dan menjadi dasar agent di modul G3.
+
+Contoh paling kecil dengan Python:
+
+```python
+import requests
+
+R = "http://localhost:11434/api/chat"
+
+def tanya(pesan: str, model: str = "qwen2.5:7b-instruct") -> str:
+    r = requests.post(R, json={
+        "model": model,
+        "messages": [{"role": "user", "content": pesan}],
+        "stream": False,
+        "options": {"temperature": 0.2},
+    }, timeout=120)
+    r.raise_for_status()
+    return r.json()["message"]["content"]
+
+print(tanya("Tulis satu kalimat tentang Aceh Tengah."))
+```
+
+Dan versi TypeScript, kalau itu lebih dekat denganmu:
+
+```typescript
+const r = await fetch('http://localhost:11434/api/chat', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    model: 'qwen2.5:7b-instruct',
+    messages: [{ role: 'user', content: 'Tulis satu kalimat tentang Aceh Tengah.' }],
+    stream: false,
+    options: { temperature: 0.2 },
+  }),
+})
+const { message } = await r.json()
+console.log(message.content)
+```
+
+## 4. Ukur, jangan menebak
+
+Sebelum kamu membangun apa pun di atas model ini, dapatkan tiga angka. Tiga angka ini akan menyelamatkanmu dari janji yang tidak bisa ditepati.
+
+<Terminal perintah="ollama run qwen2.5:7b-instruct --verbose">
+<div className="text-redup">&gt;&gt;&gt; Tulis laporan 300 kata tentang cuaca.</div>
+<div className="mt-2 text-hijau">total duration:       4.2s</div>
+<div className="text-hijau">eval rate:            38.15 tokens/s</div>
+</Terminal>
+
+Yang perlu dicatat:
+
+| Metrik | Cara baca | Target wajar (7B, CPU+GPU entry) |
+|---|---|---|
+| `eval rate` | kecepatan menghasilkan token | 20–40 token/detik nyaman; di bawah 5 terasa menyiksa |
+| `prompt eval rate` | kecepatan membaca pertanyaan | cepat, biasanya bukan masalah |
+| `total duration` | waktu end-to-end | yang dirasakan pengguna |
+
+Ukur juga memori yang terpakai saat model sedang dimuat:
+
+<Terminal perintah="ollama ps">
+<div className="text-redup">NAME                       SIZE     PROCESSOR    UNTIL</div>
+<div>qwen2.5:7b-instruct        4.7 GB   82% GPU      4 minutes from now</div>
+</Terminal>
+
+<Callout tipe="tips" judul="Model menghilang setelah beberapa menit">
+Secara bawaan Ollama menurunkan model dari memori setelah sekitar 5 menit menganggur. Permintaan pertama setelah itu akan lebih lambat karena model dimuat ulang. Untuk eksperimen, atur `OLLAMA_KEEP_ALIVE=10m` atau kirim `keep_alive` di setiap permintaan.
+</Callout>
+
+## 5. Menulis resep model sendiri
+
+Untuk mengunci parameter tanpa mengetiknya berulang kali, buat `Modelfile`:
+
+```
+FROM qwen2.5:7b-instruct
+
+PARAMETER temperature 0.2
+PARAMETER num_ctx 8192
+PARAMETER top_p 0.9
+
+SYSTEM """
+Kamu adalah asisten yang menjawab dalam bahasa Indonesia.
+Jawab singkat. Kalau tidak tahu, katakan tidak tahu.
+Jangan pernah mengarang angka, nama, atau tanggal.
+"""
+```
+
+Lalu bangun dan pakai:
+
+<Terminal perintah="ollama create asisten-id -f Modelfile && ollama run asisten-id">
+</Terminal>
+
+Baris "jangan mengarang angka" di atas bukan hiasan. Model kecil sangat mudah berhalusinasi pada fakta spesifik, dan instruksi eksplisit seperti ini menurunkannya secara terasa. Kita akan membahas teknik menekan halusinasi lebih jauh di modul B6.
+
+<Tugas ke="2">
+Lakukan tiga hal, dan catat hasilnya di catatanmu:
+
+1. Pasang Ollama dan jalankan `qwen2.5:7b-instruct`.
+2. Jalankan dengan `--verbose`, lalu catat `eval rate` dan porsi GPU/CPU dari `ollama ps`.
+3. Buat `Modelfile` sendiri dengan instruksi sistem yang melarang model mengarang fakta, lalu uji dengan pertanyaan yang jawabannya pasti tidak diketahui model — misalnya "Siapa kepala dinas X pada 2019?"
+
+Kalau model tetap menjawab dengan yakin di langkah 3, kamu baru saja melihat masalah terbesar model kecil secara langsung. Itu yang akan kita tangani di modul-modul berbayar.
+</Tugas>
+
+Selanjutnya: mengubah model yang hanya menjawab menjadi agent yang bisa **bertindak**.

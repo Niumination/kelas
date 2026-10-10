@@ -1,0 +1,328 @@
+---
+judul: Deploy produksi — hidup, terpantau, dan tidak boros
+ringkasan: "Dari proses Python di laptop ke servis yang tetap hidup jam 3 pagi: Docker, systemd, health check, backup, monitoring, dan hitungan biaya server yang sebenarnya."
+menit: 30
+urutan: 2
+tags: [deploy, docker, monitoring, biaya, berbayar]
+---
+
+Di laptop, agent-mu hidup selama terminalmu terbuka. Di produksi, ia harus bertahan dari hal-hal yang tidak pernah terjadi saat kamu mengujinya sendiri.
+
+## Yang berubah saat sistemmu dipakai orang lain
+
+Di laptop, agent-mu hidup selama terminalmu terbuka. Di produksi, ia harus bertahan dari: koneksi putus, model kehabisan memori, disk penuh, proses mati, dan permintaan yang datang bersamaan.
+
+Lima hal yang wajib ada sebelum kamu menyebutnya "produksi":
+
+1. **Supervisi proses** — systemd atau orkestrasi kontainer yang memulai ulang saat mati.
+2. **Health check** — endpoint yang jujur, bukan sekadar mengembalikan 200.
+3. **Batas sumber daya** — memori, waktu, dan biaya per permintaan.
+4. **Log terstruktur** — JSON dengan ID permintaan, bukan `print()` yang bercampur.
+5. **Rencana ketika gagal** — bukan *apakah* ia akan gagal, tapi *kapan*.
+
+## Gambaran biaya server (2026)
+
+| Pilihan | Perkiraan bulanan | Cocok untuk |
+|---|---|---|
+| VPS CPU 8 vCPU / 16 GB | Rp 300–600 ribu | model 3B–7B, trafik rendah |
+| VPS + GPU entry (8 GB VRAM) | Rp 2–4 juta | model 7B–14B, respons cepat |
+| GPU 24 GB | Rp 6–12 juta | model 32B, beban paralel |
+| Server sendiri di kantor | listrik + perawatan | data yang sama sekali tidak boleh keluar gedung |
+
+Angka ini berubah cepat — yang penting cara membacanya: **pilih model dulu, lalu pilih mesin**, bukan sebaliknya. Urutan terbalik adalah sumber paling umum dari server mahal yang menganggur.
+
+<Callout tipe="peringatan" judul="Angka di atas ilustrasi, bukan penawaran">
+Harga VPS dan GPU bergerak cepat, dan berbeda antar penyedia serta wilayah. Angka itu berguna untuk memahami **orde besarnya** — bahwa melompat ke GPU bisa berarti biaya sepuluh kali lipat — bukan untuk dijadikan patokan anggaran.
+
+Sebelum berkomitmen, ukur dulu: jalankan model yang kamu incar di mesin sewaan harian, catat latensi dan throughput-nya, baru tentukan. Satu jam pengukuran menghemat berminggu-minggu biaya yang salah.
+</Callout>
+
+## Compose: aplikasi, model, database, antrean
+
+```yaml
+# compose.yaml
+services:
+  aplikasi:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      ollama:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+    environment:
+      OLLAMA_URL: http://ollama:11434
+      DSN: postgresql://app:app@db:5432/agent
+    ports:
+      - "127.0.0.1:8080:8080"     # jangan buka 0.0.0.0 tanpa reverse proxy
+    mem_limit: 2g
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    volumes:
+      - ollama:/root/.ollama
+    healthcheck:
+      # bukan sekadar "proses hidup": minta model betul-betul menjawab
+      test: ["CMD", "ollama", "run", "qwen2.5:7b-instruct", "hai"]
+      interval: 60s
+      timeout: 120s
+      retries: 5
+      start_period: 300s        # unduh & muat model butuh waktu
+    deploy:
+      resources:
+        reservations:
+          memory: 8G
+
+  db:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+      POSTGRES_DB: agent
+    volumes:
+      - db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d agent"]
+      interval: 15s
+      retries: 5
+
+  antrean:
+    image: valkey/valkey:8
+    restart: unless-stopped
+    volumes:
+      - antrean:/data
+
+volumes:
+  ollama:
+  db:
+  antrean:
+```
+
+Empat keputusan di atas yang sering disepelekan:
+
+- **`127.0.0.1:8080:8080`, bukan `8080:8080`.** Yang kedua memaparkan portmu ke seluruh antarmuka jaringan. Biarkan reverse proxy (Nginx/Caddy) yang menghadap publik, dan biarkan dia yang memegang TLS.
+- **`mem_limit` pada aplikasi.** Tanpa batas, kebocoran memori di aplikasimu bisa menghabiskan memori host dan menjatuhkan Ollama yang ada di mesin yang sama.
+- **`depends_on: condition: service_healthy`.** Tanpa itu, aplikasi akan mulai sebelum model siap, lalu gagal, lalu restart — berulang-ulang tanpa pesan yang jelas.
+- **`start_period` pada Ollama.** Mengunduh dan memuat model butuh waktu; tanpa tenggang ini, health check akan menyatakan gagal pada menit-menit pertama dan kontainer dibunuh berulang kali.
+
+## systemd kalau tidak memakai kontainer
+
+Kontainer bukan keharusan. Untuk satu mesin, systemd seringkali lebih sederhana dan lebih mudah dipahami.
+
+```ini
+# /etc/systemd/system/agent.service
+[Unit]
+Description=Agent Niumination
+After=network-online.target ollama.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=agent
+WorkingDirectory=/opt/agent
+Environment=OLLAMA_URL=http://127.0.0.1:11434
+ExecStart=/opt/agent/.venv/bin/python -m agent
+Restart=on-failure
+RestartSec=5
+
+# Batas yang ditegakkan kernel, bukan aplikasi
+MemoryMax=2G
+CPUQuota=150%
+TasksMax=200
+
+# Pengerasan: tidak boleh menulis ke luar direktori yang diizinkan
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/agent/log /opt/agent/ruang-kerja
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now agent
+sudo systemctl status agent
+```
+
+Bagian `ProtectSystem=strict` dan `ReadWritePaths` layak diperhatikan: meski aplikasimu punya celah, ia tidak bisa menulis ke sembarang tempat. Ini pagar pembatas dari pelajaran B5, tetapi ditegakkan oleh sistem operasi — lapis yang sama sekali berbeda.
+
+## Health check yang jujur
+
+```python
+# health.py
+import os
+import time
+import psycopg
+import requests
+
+
+def periksa(ollama: str, dsn: str, model: str) -> tuple[bool, dict]:
+    rincian = {}
+
+    try:
+        t0 = time.time()
+        r = requests.post(f"{ollama}/api/chat", json={
+            "model": model,
+            "messages": [{"role": "user", "content": "balas: OK"}],
+            "stream": False,
+            "options": {"num_predict": 8},
+        }, timeout=20)
+        rincian["model"] = "siap" if r.ok else f"http {r.status_code}"
+        rincian["latensi_model_detik"] = round(time.time() - t0, 2)
+    except Exception as e:
+        rincian["model"] = f"gagal: {type(e).__name__}"
+
+    try:
+        with psycopg.connect(dsn, connect_timeout=3) as k:
+            with k.cursor() as cur:
+                cur.execute("select 1")
+        rincian["database"] = "siap"
+    except Exception as e:
+        rincian["database"] = f"gagal: {type(e).__name__}"
+
+    stat = os.statvfs("/")
+    sisa_persen = stat.f_bavail / stat.f_blocks * 100
+    rincian["disk_sisa_persen"] = round(sisa_persen, 1)
+
+    sehat = (rincian.get("model") == "siap"
+             and rincian.get("database") == "siap"
+             and sisa_persen > 10)
+    return sehat, rincian
+```
+
+Perbedaan antara health check yang jujur dan yang palsu:
+
+| | Palsu | Jujur |
+|---|---|---|
+| Pertanyaan | "apakah prosesnya hidup?" | "bisakah ia melayani permintaan sekarang?" |
+| Isi | `return {"status": "ok"}` | cek model, database, dan disk |
+| Berguna saat | hampir tidak pernah | disk penuh, model belum dimuat, DB putus |
+| Biaya | nol | satu panggilan model kecil tiap 30–60 detik |
+
+Ya, health check yang jujur memanggil model. Itu biaya kecil yang menggantikan penemuan masalah oleh pengguna — jauh lebih murah.
+
+## Log terstruktur
+
+```python
+# log.py
+import json
+import logging
+import sys
+from contextvars import ContextVar
+
+id_permintaan: ContextVar[str] = ContextVar("id_permintaan", default="-")
+
+
+class FormatJson(logging.Formatter):
+    def format(self, catatan: logging.LogRecord) -> str:
+        return json.dumps({
+            "waktu": self.formatTime(catatan, "%Y-%m-%dT%H:%M:%S%z"),
+            "tingkat": catatan.levelname,
+            "id_permintaan": id_permintaan.get(),
+            "modul": catatan.module,
+            "pesan": catatan.getMessage(),
+        }, ensure_ascii=False)
+
+
+def pasang() -> None:
+    pembawa = logging.StreamHandler(sys.stdout)
+    pembawa.setFormatter(FormatJson())
+    root = logging.getLogger()
+    root.handlers = [pembawa]
+    root.setLevel(logging.INFO)
+```
+
+Sekarang kamu bisa menelusuri satu permintaan dari ujung ke ujung:
+
+<Terminal perintah="docker compose logs aplikasi | jq 'select(.id_permintaan == &quot;7f3a2c&quot;)'">
+<div className="text-redup">  &lbrace;"tingkat": "INFO", "modul": "pagar", "pesan": "permintaan diterima"&rbrace;</div>
+<div className="text-redup">  &lbrace;"tingkat": "WARN", "modul": "pagar", "pesan": "tool dilarang: jalankan_shell"&rbrace;</div>
+<div className="text-hijau">  &lbrace;"tingkat": "INFO", "modul": "audit", "pesan": "ditolak"&rbrace;</div>
+</Terminal>
+
+## Backup: apa yang perlu dan apa yang tidak
+
+| Yang disimpan | Seberapa sering | Berapa lama | Mengapa |
+|---|---|---|---|
+| Keadaan agent (`keadaan.jsonl`) | tiap jam | 30 hari | tidak bisa dibuat ulang |
+| Database (Postgres) | harian | 30 hari | sumber kebenaran |
+| Jejak audit | ikut database | 1 tahun | kebutuhan kepatuhan |
+| Konfigurasi & compose | setiap perubahan | selamanya | kecil, dan menentukan |
+| Bobot model | **jangan** | — | bisa diunduh ulang |
+
+Bobot model sengaja tidak masuk daftar backup. Mengunduh ulang `qwen2.5:7b-instruct` jauh lebih murah dan lebih cepat daripada menyimpan dan memulihkan berkas berukuran gigabita. Yang tidak bisa diunduh ulang adalah **keadaan dan keputusan yang dibuat sistemmu**.
+
+```bash
+#!/usr/bin/env bash
+# backup.sh — dijalankan cron tiap jam
+set -euo pipefail
+STAMP=$(date +%Y%m%d-%H)
+docker compose exec -T db pg_dump -U app agent | gzip > /backup/db-$STAMP.sql.gz
+tar czf /backup/keadaan-$STAMP.tgz /opt/agent/log
+find /backup -name 'db-*.sql.gz'   -mtime +30 -delete
+find /backup -name 'keadaan-*.tgz' -mtime +30 -delete
+```
+
+<Callout tipe="bahaya" judul="Backup yang belum pernah dipulihkan bukan backup">
+Satu-satunya cara tahu backup-mu bekerja adalah memulihkannya. Jadwalkan sekali, di awal: pulihkan ke direktori sementara, jalankan aplikasinya ke situ, dan pastikan ia hidup.
+
+Simpan perintah pemulihannya **bersebelahan dengan perintah backup-nya**. Saat insiden terjadi, tidak ada yang punya waktu menulis ulang langkah-langkahnya.
+</Callout>
+
+## Runbook insiden satu halaman
+
+Satu halaman, ditempel di tempat yang bisa dibuka siapa pun yang sedang panik. Bukan dokumen 20 halaman yang tidak dibaca orang.
+
+```
+RUNBOOK — Agent Niumination
+
+GEJALA → TINDAKAN PERTAMA
+
+1. Semua permintaan gagal
+   → docker compose ps            (kontainer mana yang tidak sehat?)
+   → docker compose logs ollama --tail=50
+   → curl http://127.0.0.1:8080/health | jq
+
+2. Lambat mendadak
+   → nvidia-smi  atau  htop       (GPU/RAM penuh?)
+   → cek latensi p95 di dasbor
+   → cek apakah model baru saja dimuat ulang
+
+3. Biaya melonjak
+   → cek giliran per permintaan   (agent berputar-putar?)
+   → cek pengguna dengan anggaran terbesar
+   → batas.darurat(pengguna)      (turunkan kuotanya dulu, selidiki kemudian)
+
+4. Disk penuh
+   → docker system prune -f
+   → find /backup -mtime +30 -delete
+
+KONTAK: …           ESCALASI KE: …          CATATAN TERAKHIR: …
+```
+
+Formatnya sengaja "gejala → tindakan pertama", bukan "arsitektur sistem". Orang yang membuka runbook pada jam 3 pagi tidak butuh penjelasan arsitektur; ia butuh tahu perintah apa yang dijalankan lebih dulu.
+
+<Tugas ke="10">
+Terapkan agent-mu dengan salah satu dari dua jalur — Compose atau systemd — lengkap dengan:
+
+1. **Health check jujur** yang memeriksa model, database, dan disk. Buktikan ia pernah mengembalikan "tidak sehat": matikan Ollama sebentar dan lihat statusnya berubah.
+2. **Batas sumber daya**: `mem_limit` atau `MemoryMax`. Uji dengan permintaan besar, lalu tunjukkan bahwa prosesnya tidak menjatuhkan mesin.
+3. **Log terstruktur**, dan buktikan kamu bisa menelusuri satu permintaan utuh dengan `jq`.
+4. **Satu pemulihan backup yang benar-benar dijalankan** — pulihkan ke direktori sementara dan hidupkan aplikasinya dari situ.
+5. **Runbook satu halaman** dengan minimal empat gejala.
+
+Yang paling sering dilewatkan peserta adalah nomor 4, dan itu yang paling menentukan saat benar-benar terjadi masalah. Jangan tulis "backup sudah dijadwalkan" — tunjukkan keluarannya saat dipulihkan.
+</Tugas>
+
+Selanjutnya: sistemmu hidup dan terpantau. Pertanyaan terakhir yang tersisa: bagaimana kamu tahu kalau ia **memburuk**?

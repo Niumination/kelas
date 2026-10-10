@@ -1,0 +1,381 @@
+---
+judul: Multi-agent orchestration & serah tugas
+ringkasan: Kapan satu agent tidak cukup, bagaimana mereka berbagi konteks tanpa saling menimpa, dan pola supervisor/worker yang tidak berubah jadi obrolan tanpa ujung.
+menit: 30
+urutan: 2
+tags: [multi-agent, orkestrasi, berbayar, python]
+---
+
+Empat peran di pelajaran sebelumnya masih berjalan dalam satu proses, satu loop, satu tujuan. Sekarang kamu ingin dua agent mengerjakan bagian yang berbeda, lalu menggabungkan hasilnya.
+
+Begitu jumlah agent lebih dari satu, kelas kegagalannya berubah. Bukan lagi "model memilih tool yang salah", melainkan "dua agen merusak pekerjaan masing-masing".
+
+## Dua agent lebih baik dari satu — kalau alasannya tepat
+
+Alasan yang **tepat** untuk menambah agent:
+
+- ada tahap yang butuh keahlian berbeda dan tool berbeda
+- ada pekerjaan yang bisa dikerjakan paralel dan saling bebas
+- ada tahap yang perlu izin lebih tinggi, sehingga layak dipisah dan diawasi
+
+Alasan yang **tidak tepat**:
+
+- "biar terlihat canggih"
+- mengatasi agent yang tidak kunjung akurat — menambah agent di atas agent yang rapuh hanya melipatgandakan kerapuhan
+
+## Pola supervisor / worker
+
+```
+                 ┌────────────┐
+                 │ Supervisor │  pegang tujuan, bagi tugas
+                 └─────┬──────┘
+        ┌──────────────┼──────────────┐
+        ▼              ▼              ▼
+  ┌──────────┐   ┌──────────┐   ┌──────────┐
+  │ Worker A │   │ Worker B │   │ Worker C │
+  │ riset    │   │ tulis    │   │ uji      │
+  └────┬─────┘   └────┬─────┘   └────┬─────┘
+       └──────────────┼──────────────┘
+                      ▼
+              verifikasi gabungan
+```
+
+Supervisor menyimpan satu hal yang tidak dimiliki worker: **tujuan akhirnya**. Worker hanya tahu potongan tugasnya. Ini yang membuat sistem tetap punya arah setelah sepuluh serah tugas.
+
+## Masalah yang muncul begitu agent lebih dari satu
+
+Tiga hal ini pasti terjadi, dan hampir selalu tidak diantisipasi:
+
+1. **Konteks saling menimpa.** Dua agent menulis ke keadaan yang sama; hasil kerja A hilang ditimpa B.
+2. **Giliran mengembang tanpa batas.** A meminta B, B meminta A, dan tidak ada yang selesai.
+3. **Biaya naik tanpa terasa.** Setiap serah tugas mengirim ulang konteks; lima agent mengobrol sepuluh giliran bisa menghabiskan konteks yang setara satu dokumen panjang.
+
+Solusinya bukan menambah aturan di prompt, melainkan **struktur**: keadaan bersama yang hanya boleh ditulis oleh satu peran, anggaran giliran yang ditegakkan di kode, dan ringkasan wajib setiap kali serah tugas.
+
+## Keadaan bersama: satu penulis, banyak pembaca
+
+Kesalahan paling umum pada sistem multi-agent adalah memberi semua agent akses tulis ke keadaan yang sama. Hampir selalu berakhir dengan pekerjaan yang hilang.
+
+Aturan yang kupakai: **keadaan bersama bersifat append-only, dan hanya Supervisor yang boleh menulis ke dalamnya.** Worker mengembalikan hasil; Supervisor yang memutuskannya menjadi bagian dari keadaan.
+
+```python
+# keadaan.py
+import json
+import os
+import threading
+from datetime import datetime, timezone
+
+BERKAS = "log/keadaan.jsonl"
+KUNCI = threading.Lock()
+
+
+def catat(siapa: str, jenis: str, isi: dict) -> None:
+    """Tambahkan satu baris ke log keadaan. Tidak ada operasi 'ubah'."""
+    os.makedirs(os.path.dirname(BERKAS), exist_ok=True)
+    baris = {
+        "waktu": datetime.now(timezone.utc).isoformat(),
+        "siapa": siapa,
+        "jenis": jenis,
+        "isi": isi,
+    }
+    with KUNCI:                       # dua worker bisa menulis bersamaan
+        with open(BERKAS, "a", encoding="utf-8") as f:
+            f.write(json.dumps(baris, ensure_ascii=False) + "\n")
+
+
+def baca(jenis: str | None = None) -> list[dict]:
+    if not os.path.exists(BERKAS):
+        return []
+    with open(BERKAS, "r", encoding="utf-8") as f:
+        semua = [json.loads(b) for b in f if b.strip()]
+    return [b for b in semua if jenis is None or b["jenis"] == jenis]
+
+
+def bersih() -> None:
+    if os.path.exists(BERKAS):
+        os.remove(BERKAS)
+```
+
+Kenapa append-only dan bukan satu berkas JSON yang diperbarui? Tiga alasan praktis:
+
+- **Tidak ada lost update.** Dua worker menulis bersamaan tidak pernah saling menimpa.
+- **Riwayatnya gratis.** Kamu bisa memutar ulang kegagalan persis seperti yang terjadi.
+- **Tidak butuh migrasi skema.** Menambah jenis entri baru tidak menyentuh entri lama.
+
+Kalau sistemmu nanti butuh "keadaan terakhir", jangan mengubah berkas ini — bentuklah dengan membaca baris terakhir untuk setiap kunci yang kamu perlukan.
+
+## Format serah tugas yang tidak membuang konteks
+
+Serah tugas (*handoff*) yang buruk mengirim seluruh riwayat percakapan ke agent berikutnya. Mahal, dan sebagian besar isinya tidak relevan bagi penerima.
+
+Serah tugas yang baik mengirim **paket**: apa yang sudah diketahui, apa yang perlu dikerjakan, dan bukti yang mendukung.
+
+```python
+# handoff.py
+from pydantic import BaseModel, Field
+
+class PaketSerah(BaseModel):
+    """Yang dikirim Supervisor ke Worker, dan sebaliknya."""
+    tugas: str                              # apa yang harus dikerjakan
+    tujuan_akhir: str                       # konteks: untuk apa semua ini
+    fakta: list[str] = Field(default_factory=list)   # sudah pasti benar
+    bukti: list[str] = Field(default_factory=list)   # kutipan pendek, bukan seluruh berkas
+    batasan: list[str] = Field(default_factory=list) # yang tidak boleh dilakukan
+    ringkasan: str = ""                     # wajib diisi oleh pengirim
+
+    def ke_prompt(self) -> str:
+        return (
+            f"Tujuan akhir: {self.tujuan_akhir}\n\n"
+            f"Tugasmu: {self.tugas}\n\n"
+            f"Fakta yang sudah diketahui:\n"
+            + "\n".join(f"- {f}" for f in self.fakta) + "\n\n"
+            f"Bukti:\n" + "\n".join(f"- {b[:300]}" for b in self.bukti) + "\n\n"
+            f"Batasan:\n" + "\n".join(f"- {b}" for b in self.batasan)
+        )
+```
+
+Perbedaan antara `fakta` dan `bukti` sengaja dibuat:
+
+- **`fakta`** adalah pernyataan yang sudah diverifikasi — ia boleh dipakai worker tanpa memeriksa ulang.
+- **`bukti`** adalah kutipan pendek yang mendukung fakta itu. Ia dibatasi 300 karakter supaya paket tidak mengembang.
+
+<Callout tipe="peringatan" judul="Ringkasan wajib, bukan opsional">
+Field `ringkasan` adalah yang paling sering dikosongkan, dan akibatnya paling mahal: tanpa ringkasan, setiap penerima terpaksa membaca ulang seluruh riwayat untuk tahu apa yang sudah terjadi.
+
+Buat aturan di kode, bukan di prompt: `PaketSerah` tanpa `ringkasan` yang tidak kosong ditolak sebelum dikirim.
+</Callout>
+
+## Supervisor dengan antrean dan anggaran
+
+```python
+# supervisor.py
+import requests
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
+from pydantic import ValidationError
+from handoff import PaketSerah
+from keadaan import catat, baca
+
+OLLAMA = "http://localhost:11434/api/chat"
+MODEL = "qwen2.5:7b-instruct"
+
+ANGGARAN = {
+    "maks_tugas": 6,        # jumlah tugas yang boleh dibuat Supervisor
+    "maks_giliran": 12,     # total serah tugas
+    "maks_token": 60_000,   # perkiraan token prompt + eval
+    "detik_per_tugas": 120, # waktu maksimum satu tugas
+}
+
+
+class AnggaranHabis(Exception):
+    pass
+
+
+class Supervisor:
+    def __init__(self, tujuan: str, anggaran: dict | None = None):
+        self.tujuan = tujuan
+        self.anggaran = {**ANGGARAN, **(anggaran or {})}
+        self.terpakai = {"tugas": 0, "giliran": 0, "token": 0}
+
+    def _pakai(self, kunci: str, jumlah: int = 1) -> None:
+        self.terpakai[kunci] += jumlah
+        if (kunci == "tugas" and self.terpakai["tugas"] > self.anggaran["maks_tugas"]) \
+           or (kunci == "giliran" and self.terpakai["giliran"] > self.anggaran["maks_giliran"]) \
+           or self.terpakai["token"] > self.anggaran["maks_token"]:
+            raise AnggaranHabis(f"anggaran habis: {self.terpakai}")
+
+    def _panggil(self, paket: PaketSerah) -> str:
+        self._pakai("giliran")
+        r = requests.post(OLLAMA, json={
+            "model": MODEL,
+            "messages": [{"role": "user", "content": paket.ke_prompt()}],
+            "stream": False,
+            "options": {"temperature": 0.2},
+        }, timeout=self.anggaran["detik_per_tugas"])
+        r.raise_for_status()
+        data = r.json()
+        self._pakai("token", data.get("prompt_eval_count", 0) + data.get("eval_count", 0))
+        return data["message"]["content"]
+
+    def jalankan(self, daftar_tugas: list[str]) -> list[dict]:
+        paket = [
+            PaketSerah(
+                tugas=t,
+                tujuan_akhir=self.tujuan,
+                batasan=["Jangan menulis ke luar ruang kerja.",
+                         "Jangan memanggil tool yang tidak disediakan."],
+                ringkasan=f"Tugas {i + 1} dari {len(daftar_tugas)}.",
+            )
+            for i, t in enumerate(daftar_tugas)
+        ]
+        return self._kerjakan(paket)
+
+    def _kerjakan(self, paket: list[PaketSerah]) -> list[dict]:
+        hasil = []
+        with ThreadPoolExecutor(max_workers=3) as kolam:
+            masa_depan = {kolam.submit(self._panggil, p): p for p in paket}
+            for depan, p in masa_depan.items():
+                try:
+                    teks = depan.result(timeout=self.anggaran["detik_per_tugas"])
+                    catat("worker", "hasil", {"tugas": p.tugas, "keluaran": teks[:2000]})
+                    hasil.append({"tugas": p.tugas, "keluaran": teks})
+                except (FutureTimeout, AnggaranHabis, ValidationError) as e:
+                    catat("worker", "gagal", {"tugas": p.tugas,
+                                              "error": f"{type(e).__name__}: {e}"})
+                    hasil.append({"tugas": p.tugas, "keluaran": "",
+                                  "error": f"{type(e).__name__}: {e}"})
+                self._pakai("tugas")
+        return hasil
+```
+
+Tiga hal yang membuat supervisor ini selamat dari kegagalan yang umum:
+
+- **Anggaran ditegakkan di `_pakai`, bukan di prompt.** Model tidak bisa "membujuk" kode untuk menambah giliran.
+- **Timeout per tugas.** Worker yang menggantung tidak akan menggantungkan seluruh sistem.
+- **Kegagalan satu worker tidak menghentikan yang lain** — ia dicatat, dan Supervisor tetap punya hasil sebagian.
+
+## Menjalankan worker paralel tanpa bentrok pada berkas
+
+Paralel itu mudah; yang sulit adalah memastikan dua worker tidak menulis berkas yang sama. Cara paling sederhana dan paling bisa diandalkan: **beri setiap worker direktorinya sendiri, lalu gabungkan.**
+
+```python
+# ruang.py
+import os
+import shutil
+from contextlib import contextmanager
+
+AKAR = os.path.abspath("./ruang-kerja")
+
+@contextmanager
+def ruang_worker(nama: str):
+    """Beri worker direktori sendiri; hapus setelah selesai."""
+    direktori = os.path.join(AKAR, f".kerja-{nama}")
+    os.makedirs(direktori, exist_ok=True)
+    try:
+        yield direktori
+    finally:
+        shutil.rmtree(direktori, ignore_errors=True)
+```
+
+Dengan ini, dua worker yang sama-sama menulis `laporan.md` tidak saling menimpa — mereka menulis ke `ruang-kerja/.kerja-A/laporan.md` dan `ruang-kerja/.kerja-B/laporan.md`. Penggabungan dilakukan Supervisor setelah kedua hasil diverifikasi, bukan oleh worker.
+
+Kalau dua worker **memang harus** mengubah berkas yang sama, jangan paralelkan. Serahkan ke satu worker secara berurutan - paralel pada berkas yang sama selalu berakhir dengan kehilangan data, entah hari ini atau minggu depan.
+
+## Konflik: dua worker menghasilkan jawaban berbeda
+
+Ini pasti terjadi, dan yang menentukan kualitas sistemmu adalah apa yang dilakukan saat itu. Urutan penanganan yang kupakai:
+
+**1. Coba selesaikan tanpa model.** Kalau keduanya menghasilkan angka, bandingkan. Kalau keduanya menghasilkan berkas, bandingkan isinya. Kalau salah satu gagal dan yang lain berhasil, pemenangnya sudah jelas.
+
+**2. Kalau tidak bisa diputuskan secara deterministik, minta penengah** — satu panggilan model yang menerima kedua jawaban beserta buktinya, dan diminta memilih disertai alasan.
+
+**3. Kalau penengah pun ragu, jangan pilih.** Kembalikan ketidakpastiannya ke manusia atau ke tahap berikutnya. Memilih secara acak di sini lebih buruk daripada mengakui tidak tahu.
+
+```python
+# konflik.py
+import requests
+from keadaan import catat
+
+OLLAMA = "http://localhost:11434/api/chat"
+MODEL = "qwen2.5:7b-instruct"
+
+
+def selesaikan(tugas: str, jawaban: list[str]) -> dict:
+    unik = list(dict.fromkeys(j.strip() for j in jawaban if j.strip()))
+    if not unik:
+        return {"pilihan": None, "alasan": "semua worker gagal"}
+    if len(unik) == 1:
+        return {"pilihan": unik[0], "alasan": "semua worker sepakat"}
+
+    r = requests.post(OLLAMA, json={
+        "model": MODEL,
+        "messages": [{
+            "role": "user",
+            "content": (
+                f"Tugas: {tugas}\n\n"
+                + "\n\n".join(f"Jawaban {i + 1}:\n{j[:1200]}" for i, j in enumerate(unik))
+                + "\n\nPilih jawaban yang paling memenuhi tugas. "
+                  "Jawab dengan angka pilihan, lalu satu kalimat alasan. "
+                  "Kalau tidak ada yang bisa dipilih, jawab: 0"
+            ),
+        }],
+        "stream": False,
+        "options": {"temperature": 0.0},
+    }, timeout=180)
+    r.raise_for_status()
+    teks = r.json()["message"]["content"].strip()
+
+    try:
+        nomor = int(teks[0])
+    except ValueError:
+        nomor = 0
+    if nomor < 1 or nomor > len(unik):
+        catat("konflik", "tidak_terpecahkan", {"tugas": tugas, "jumlah": len(unik)})
+        return {"pilihan": None, "alasan": f"penengah ragu: {teks[:200]}"}
+
+    catat("konflik", "terpecahkan", {"tugas": tugas, "pilihan": nomor})
+    return {"pilihan": unik[nomor - 1], "alasan": teks[:200]}
+```
+
+<Callout tipe="tips" judul="Konflik yang tidak terpecahkan adalah data, bukan kegagalan">
+Setiap kali `selesaikan` mengembalikan `pilihan: None`, itu sinyal bahwa tugasnya tidak cukup jelas — bukan bahwa modelnya kurang pintar.
+
+Kumpulkan kasus-kasus itu. Setelah sepuluh kasus, polanya hampir selalu terlihat: tugas yang terlalu luas, atau keadaan yang tidak cukup dikirim ke worker. Perbaikannya ada di cara kamu membagi tugas, bukan di prompt penengah.
+</Callout>
+
+## Apakah penambahan ini sepadan?
+
+Pertanyaan yang harus dijawab sebelum menambah agent kedua, dan dijawab lagi sesudahnya. Bandingkan tiga angka pada sepuluh tujuan yang sama:
+
+| Metrik | Satu agent (B1) | Multi-agent (B2) |
+|---|---|---|
+| Tujuan selesai dari 10 | | |
+| Rata-rata token per tujuan | | |
+| Rata-rata waktu per tujuan | | |
+
+Ukur sendiri dengan `biaya.py` dari pelajaran sebelumnya dan isi tabelnya. Kalau kolom kanan tidak menang cukup jauh, **kembalilah ke satu agent.** Dua agent yang tidak lebih baik dari satu agent hanya memberimu dua kali lipat tempat gagal.
+
+Yang biasanya terjadi: multi-agent menang pada tugas yang bisa dipecah menjadi bagian-bagian yang saling bebas, dan kalah pada tugas yang setiap langkahnya bergantung pada hasil langkah sebelumnya.
+
+Simpan dulu pemanggilnya, supaya tidak perlu berurusan dengan tanda kutip bersarang:
+
+```python
+# jalankan_supervisor.py
+from supervisor import Supervisor
+from konflik import selesaikan
+
+s = Supervisor("Ringkas tiga berkas di ruang kerja")
+hasil = s.jalankan(["baca semua berkas", "ringkas jadi satu paragraf"])
+print(selesaikan("ringkasan", [h["keluaran"] for h in hasil]))
+print("anggaran terpakai:", s.terpakai)
+```
+
+<Terminal perintah="python jalankan_supervisor.py">
+<div className="text-redup">  [worker] hasil tercatat: baca semua berkas</div>
+<div className="text-redup">  [worker] hasil tercatat: ringkas jadi satu paragraf</div>
+<div className="text-hijau">  pilihan: Ruang kerja berisi tiga berkas catatan...</div>
+<div className="text-hijau">  alasan: semua worker sepakat</div>
+<div className="text-hijau">  anggaran terpakai: 2 tugas · 2 giliran · 1840 token</div>
+</Terminal>
+
+Kalau Supervisor menghabiskan anggaran sebelum semua tugas selesai, lihat `log/keadaan.jsonl`. Entri berjenis `gagal` akan memberitahumu apakah yang habis adalah giliran, token, atau waktu — dan ketiganya punya obat yang berbeda.
+
+<Tugas ke="6">
+Bangun sistem dua agent di atas agent empat peran dari pelajaran sebelumnya:
+
+- **Agent riset** — boleh membaca berkas dan mencari, tidak boleh menulis apa pun.
+- **Agent tulis** — menerima paket serah dari agent riset, menulis hasilnya ke ruang kerja.
+
+Keduanya dijalankan Supervisor dengan anggaran pada `ANGGARAN`.
+
+Lalu uji pada **sepuluh tujuan yang sama** yang kamu pakai di pelajaran B1, dan jawab tiga pertanyaan ini dengan angka:
+
+1. Berapa dari sepuluh tujuan yang selesai — bandingkan dengan angka B1-mu.
+2. Berapa total token yang dipakai — bandingkan juga.
+3. Berapa kali `selesaikan()` mengembalikan `pilihan: None`.
+
+Yang menarik biasanya bukan angka 1, melainkan angka 3. Kalau penengah sering ragu, berarti pembagian tugasmu menghasilkan bagian yang tumpang tindih — dan itu masalah desain, bukan masalah model.
+
+Simpan `log/keadaan.jsonl` dari percobaan terbaikmu. Ia menjadi bukti utama di proyek akhir bahwa sistemmu benar-benar berjalan.
+</Tugas>
+
+Selanjutnya: agent-mu bekerja, tapi ingatannya sebatas apa yang muat di konteks. Modul berikutnya memberinya memori yang tidak hilang saat proses dimatikan.

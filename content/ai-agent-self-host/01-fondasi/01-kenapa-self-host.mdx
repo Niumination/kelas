@@ -1,0 +1,94 @@
+---
+judul: Kenapa harus self-host?
+ringkasan: Kapan menjalankan model di mesin sendiri lebih masuk akal daripada memanggil API cloud — dan kapan justru sebaliknya. Termasuk hitungan biaya yang jujur.
+menit: 18
+urutan: 1
+tags: [konsep, biaya, privasi]
+---
+
+Sebelum menginstal apa pun, kita perlu menjawab satu pertanyaan yang sering dilewatkan: **untuk apa model ini dijalankan sendiri?**
+
+Jawaban yang jujur: self-host bukan selalu lebih baik. Ia menukar kualitas dan kenyamanan dengan kontrol, biaya variabel yang lebih rendah, dan privasi. Kelas ini tidak menjual self-host sebagai ideologi — kita pakai self-host kalau alasannya teknis, bukan karena sedang tren.
+
+## Tiga alasan yang biasanya valid
+
+### 1. Data yang tidak boleh keluar
+
+Ini alasan paling kuat dan paling sering nyata. Kalau kamu mengolah dokumen kepegawaian, rekam medis, draf peraturan yang belum tayang, atau kode sumber yang belum rilis, setiap permintaan ke API cloud berarti mengirim potongan data itu ke pihak ketiga.
+
+Self-host membuat aliran data berhenti di mesinmu. Tidak ada yang perlu kamu yakinkan dengan perjanjian kerahasiaan, karena tidak ada data yang dikirim.
+
+<Callout tipe="peringatan" judul="Self-host tidak otomatis membuatmu patuh aturan">
+Menjalankan model di server kantor tetap berarti data diproses oleh sistem. Yang hilang adalah pihak ketiga, bukan kewajiban menjaga data. Untuk instansi, ini tetap harus masuk ke analisis risiko SPBE dan dokumentasi keamanan informasi.
+</Callout>
+
+### 2. Biaya yang bisa diprediksi
+
+API cloud dihitung per token. Biayanya naik mengikuti pemakaian — bagus kalau pemakaianmu kecil dan jarang, menyakitkan kalau kamu memproses ribuan dokumen sehari.
+
+Model self-host dihitung per jam server. Biayanya sama entah kamu memproses 10 atau 10.000 dokumen hari itu, selama mesinnya sanggup. Titik impasnya tergantung volume, dan menariknya titik itu jauh lebih dekat daripada yang banyak orang kira.
+
+Ambil contoh kasar dengan harga 2026. Anggap satu pemrosesan dokumen memakai 8.000 token input dan 800 token output:
+
+| Komponen | API cloud murah | Self-host (1 GPU sewa) |
+|---|---|---|
+| Biaya per 1.000 dokumen | mengikuti tarif token × volume | Rp 0 tambahan |
+| Biaya tetap per bulan | Rp 0 | Rp 2–5 juta (server GPU) |
+| Biaya 500 dokumen/bulan | lebih murah | kalah jauh |
+| Biaya 50.000 dokumen/bulan | bisa puluhan juta | tetap Rp 2–5 juta |
+
+Angka pastinya berubah tiap beberapa bulan — yang penting adalah bentuk kurvanya: **API menang di volume rendah, self-host menang di volume tinggi**, dan keduanya jarang benar-benar seimbang di volume menengah.
+
+### 3. Belajar cara kerjanya
+
+Alasan ini sering diremehkan. Kalau semua yang kamu tahu tentang LLM adalah "kirim prompt, terima jawaban", kamu tidak akan bisa menebak kenapa agent-mu gagal di kasus tertentu. Menjalankan model sendiri memaksamu berhadapan dengan hal-hal yang disembunyikan API:
+
+- konteks yang penuh, dan apa yang terjadi ketika ia penuh
+- kuantisasi, dan mengapa model kecil kadang menjawab lebih buruk dari perkiraan
+- latensi nyata: mengapa 7B dan 70B bukan sekadar "lebih pintar" tetapi "10 kali lebih lambat"
+- sampling: `temperature`, `top_p`, dan mengapa hasilnya tidak pernah identik dua kali
+
+Pemahaman ini terbawa ke mana pun, termasuk saat kamu akhirnya tetap memakai API cloud.
+
+## Kapan self-host adalah pilihan yang buruk
+
+Jujur saja ada kalanya kamu tidak perlu repot:
+
+- **Kualitas jawaban adalah segalanya.** Model frontier di cloud masih jauh di atas model yang sanggup berjalan di satu mesin. Untuk tugas penalaran berat, bedanya nyata.
+- **Pemakaianmu jarang.** Kalau sebulan sekali, biaya API-nya mungkin masih di bawah secangkir kopi.
+- **Kamu tidak mau mengelola server.** Model self-host butuh seseorang yang menjaganya tetap hidup. Itu pekerjaan.
+- **Konteks yang sangat panjang.** Dokumen ratusan halaman dalam satu permintaan jauh lebih nyaman di layanan yang memang dirancang untuk itu.
+
+<Callout tipe="info" judul="Jawaban yang paling sering benar: hibrida">
+Produk nyata biasanya memakai keduanya. Data sensitif diproses lokal, penalaran berat dikirim ke cloud dengan data yang sudah disamarkan, dan keputusan routing-nya ditulis di kode — bukan di kebiasaan. Kelas ini mengajarkan keduanya, dengan porsi yang jelas.
+</Callout>
+
+## Peta kelas ini
+
+```
+G1  Kenapa self-host          ← kamu di sini
+G2  Ollama 101: instal & ukur
+G3  Agent pertama: tool calling
+G4  BYOK & keamanan kunci
+─────────────────────────────  garis gratis | berbayar
+B1  Anatomi agent
+B2  Multi-agent orchestration
+B3  Memory & retrieval
+B4  Tool ecosystem & MCP
+B5  Guardrails
+B6  Observability & evaluasi
+B7  Deploy produksi
+P   Proyek akhir + sertifikat
+```
+
+Empat modul pertama **gratis** dan berakhir dengan sesuatu yang nyata: agent yang berjalan di mesinmu dan memanggil tool. Tujuh modul berikutnya mengubah percobaan itu menjadi sistem yang bisa dipakai orang lain — itu bagian berbayarnya.
+
+Garisnya sengaja seperti itu: kamu berhak tahu dulu apakah mesinmu sanggup dan apakah caramu belajar cocok dengan gaya materi ini, sebelum diminta membayar.
+
+<Tugas ke="1">
+Tuliskan dalam satu paragraf, untuk dirimu sendiri: **satu** tugas nyata yang ingin kamu selesaikan dengan model lokal, dan apakah datanya boleh dikirim ke pihak ketiga atau tidak.
+
+Kalau jawabannya "boleh", self-host mungkin bukan alasan utamamu — dan itu tidak apa-apa. Kalau "tidak boleh", kamu sudah punya alasan terkuat yang ada. Simpan tulisan ini; kamu akan memakainya di proyek akhir.
+</Tugas>
+
+Selanjutnya: kita pasang Ollama dan ukur kemampuan mesinmu — tanpa menebak-nebak.

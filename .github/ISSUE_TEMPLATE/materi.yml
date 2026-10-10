@@ -1,0 +1,55 @@
+name: Usulan materi
+description: Usulkan topik, modul, atau perbaikan materi kelas
+title: '[Materi] '
+labels: ['materi']
+body:
+  - type: markdown
+    value: |
+      Sebelum mengusulkan, pastikan usulan ini lolos benang merah:
+      **membantu orang Indonesia membangun sistem AI yang berjalan di mesin mereka sendiri.**
+
+  - type: dropdown
+    id: jenis
+    attributes:
+      label: Jenis usulan
+      options:
+        - Modul baru
+        - Perbaikan materi yang sudah ada
+        - Contoh kode yang error
+        - Soal kuis
+    validations:
+      required: true
+
+  - type: dropdown
+    id: sisi
+    attributes:
+      label: Bagian kelas
+      options:
+        - Gratis (fondasi & agent pertama)
+        - Berbayar (orkestrasi & produksi)
+        - Keduanya
+    validations:
+      required: true
+
+  - type: textarea
+    id: isi
+    attributes:
+      label: Usulan
+      description: Apa yang ingin ditambahkan atau diperbaiki, dan mengapa itu penting.
+    validations:
+      required: true
+
+  - type: textarea
+    id: bukti
+    attributes:
+      label: Bukti atau contoh
+      description: Untuk contoh kode yang error, sertakan perintah, keluaran terminal, dan versi Ollama.
+
+  - type: checkboxes
+    id: aturan
+    attributes:
+      label: Aturan konten
+      options:
+        - label: Usulan ini tidak memindahkan materi produksi ke bagian gratis
+        - label: Usulan ini berbentuk teks + kode yang bisa dijalankan, bukan video wajib
+        - label: Usulan ini berbahasa Indonesia

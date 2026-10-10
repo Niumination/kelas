@@ -1,0 +1,417 @@
+---
+judul: Memory & retrieval — pgvector, Qdrant, dan cara memotong dokumen
+ringkasan: Cara memberi agent ingatan yang bisa dicari, tanpa mengirim seluruh dokumen ke model setiap kali bertanya.
+menit: 30
+urutan: 1
+tags: [memory, retrieval, pgvector, embedding, berbayar, python]
+---
+
+Agent-mu bisa merencanakan dan menjalankan tool. Tapi begitu prosesnya dimatikan, ia lupa segalanya. Dan selama hidup pun, ia hanya tahu apa yang muat di konteks.
+
+Modul ini memberinya ingatan yang bisa dicari — yang tidak hilang saat proses berhenti, dan tidak mengharuskan kamu mengirim 200 halaman ke model setiap kali bertanya.
+
+## Masalah yang dipecahkan retrieval
+
+Konteks model itu terbatas — biasanya 4.000 sampai 32.000 token tergantung model dan setup. Dokumen setebal 200 halaman jelas tidak muat. Pilihan naifnya: potong-potong dan kirim semuanya bergiliran. Itu lambat, mahal, dan sering kali justru membuat jawabannya lebih buruk karena model kebanjiran informasi yang tidak relevan.
+
+Retrieval membalik urutannya: **cari dulu yang relevan, baru kirim ke model.** Yang dikirim mungkin hanya 5 dari 800 potongan dokumen.
+
+```
+800 potongan dokumen
+        │
+        ▼  cari yang mirip dengan pertanyaan
+   5 potongan relevan
+        │
+        ▼  + pertanyaan
+      model
+        │
+        ▼
+     jawaban + kutipan sumber
+```
+
+## Tiga keputusan yang menentukan hasilnya
+
+### 1. Cara memotong (chunking)
+
+Ini yang paling sering diremehkan, dan dampaknya lebih besar daripada memilih model embedding yang "lebih bagus".
+
+| Cara | Kelebihan | Kelemahan |
+|---|---|---|
+| Potong per N token tetap | sederhana, cepat | memutus kalimat di tengah, merusak makna |
+| Potong per paragraf | menjaga utuhan gagasan | ukuran tidak seragam |
+| Potong per struktur (heading, pasal, ayat) | paling masuk akal untuk dokumen terstruktur | butuh parser per jenis dokumen |
+| Tumpang tindih (overlap) | tidak kehilangan konteks di batas potongan | ada teks ganda; biaya sedikit naik |
+
+Untuk dokumen Indonesia yang formal — peraturan, SOP, naskah dinas — **memotong mengikuti struktur pasal/ayat hampir selalu lebih baik** daripada memotong per N karakter. Dokumen semacam itu punya struktur yang jelas, dan struktur itu membawa makna.
+
+### 2. Model embedding
+
+Embedding mengubah teks menjadi vektor. Yang perlu kamu perhatikan:
+
+- **Dimensi** — 384, 768, 1024, 1536. Lebih besar tidak selalu lebih baik; yang penting konsisten antara saat menyimpan dan saat mencari.
+- **Bahasa** — model embedding yang dilatih terutama pada teks Inggris akan menangani bahasa Indonesia dengan buruk. Ini sumber kegagalan yang sering tidak disadari.
+- **Ukuran** — model embedding kecil (`nomic-embed-text`, ~270 MB) sudah cukup untuk kebanyakan kasus dan bisa jalan di CPU.
+
+### 3. Tempat menyimpan vektor
+
+Dua pilihan yang paling masuk akal kalau kamu sudah memakai Postgres:
+
+| | pgvector (ekstensi Postgres) | Qdrant (server terpisah) |
+|---|---|---|
+| Operasi | tidak ada servis tambahan | servis sendiri, butuh memori sendiri |
+| Skala | nyaman sampai jutaan vektor | dirancang untuk skala besar |
+| Transaksional | ikut transaksi databasemu | terpisah dari database utama |
+| Kapan dipilih | **hampir selalu, untuk memulai** | kalau vektor sudah puluhan juta |
+
+Kalau datamu sudah ada di Postgres, menambah pgvector hampir selalu lebih murah daripada merawat satu servis lagi.
+
+## Skema penyimpanan yang tidak menyiksamu nanti
+
+```sql
+-- skema.sql
+create extension if not exists vector;
+
+create table dokumen (
+  id          bigserial primary key,
+  sumber      text not null,             -- nama berkas / URL asal
+  judul       text not null,
+  dibuat      timestamptz default now()
+);
+
+create table potongan (
+  id          bigserial primary key,
+  dokumen_id  bigint not null references dokumen(id) on delete cascade,
+  urutan      int    not null,           -- nomor potongan dalam dokumen
+  teks        text   not null,
+  penanda     text,                      -- "Pasal 4 ayat (2)" — untuk kutipan
+  embedding   vector(768) not null,      -- sesuaikan dengan dimensi modelmu
+  unique (dokumen_id, urutan)
+);
+
+-- indeks pencarian kemiripan kosinus
+create index potongan_embedding_idx
+  on potongan using hnsw (embedding vector_cosine_ops)
+  with (m = 16, ef_construction = 64);
+```
+
+Tiga keputusan di atas yang perlu dipahami, bukan sekadar disalin:
+
+- **`penanda` disimpan sejak awal.** Kolom ini yang memungkinkan jawabanmu menyertakan kutipan seperti "Pasal 4 ayat (2)". Menambahkannya belakangan berarti menghitung ulang seluruh korpus.
+- **`unique (dokumen_id, urutan)`** membuat pengindeksan ulang bersifat idempoten. Tanpa itu, dua kali menjalankan pipeline akan menggandakan isi.
+- **`on delete cascade`** — menghapus dokumen menghapus potongannya. Tidak ada vektor yatim.
+
+<Callout tipe="peringatan" judul="Indeks HNSW tidak selalu mempercepat">
+Indeks HNSW dibangun secara perkiraan (*approximate*). Di bawah sekitar sepuluh ribu baris, **pindai berurutan sering lebih cepat** daripada memakai indeks — dan hasilnya justru lebih akurat karena tidak ada perkiraan.
+
+Indeks itu juga bukan tanpa biaya: ia menambah waktu tulis, menambah memori, dan harus dibangun ulang kalau kamu mengganti model embedding.
+
+Aturan praktis: **tanpa indeks dulu.** Pasang HNSW setelah tabelnya lebih dari sepuluh ribu baris dan pencarian mulai terasa lambat. Ukur sebelum dan sesudahnya.
+</Callout>
+
+## Pipeline: dari berkas sampai bisa dicari
+
+```python
+# indeks.py
+import os
+import re
+import requests
+import psycopg
+from pgvector.psycopg import register_vector
+
+OLLAMA = "http://localhost:11434"
+MODEL_EMBED = "nomic-embed-text"
+DIMENSI = 768
+DSN = "postgresql://localhost/agentku"
+
+MAKS_POTONGAN = 1200     # karakter
+MIN_POTONGAN = 200       # potongan lebih kecil dari ini digabung ke sebelumnya
+OVERLAP = 150            # karakter yang diulang di batas potongan
+
+
+def sematkan(teks: str) -> list[float]:
+    r = requests.post(f"{OLLAMA}/api/embeddings", json={
+        "model": MODEL_EMBED,
+        "prompt": teks,
+    }, timeout=180)
+    r.raise_for_status()
+    v = r.json()["embedding"]
+    if len(v) != DIMENSI:
+        raise ValueError(f"dimensi {len(v)} tidak sesuai {DIMENSI}")
+    return v
+
+
+def potong(teks: str) -> list[tuple[str, str]]:
+    """Potong mengikuti struktur pasal/ayat; kembalikan (penanda, isi)."""
+    pola = r"(?m)^\s*(Pasal\s+\d+.*|BAB\s+[IVX]+.*|\d+\.\s+[A-Z].*)$"
+    bagian = re.split(pola, teks)
+    potongan, penanda, buffer = [], "Pembukaan", ""
+
+    for i in range(0, len(bagian)):
+        segmen = bagian[i]
+        if segmen is None:
+            continue
+        if re.match(pola, segmen):        # baris ini adalah judul struktur
+            if buffer.strip():
+                potongan.extend(_pecah(buffer, penanda))
+            penanda, buffer = segmen.strip(), ""
+        else:
+            buffer += segmen
+    if buffer.strip():
+        potongan.extend(_pecah(buffer, penanda))
+
+    # gabung potongan yang terlalu pendek ke sebelumnya
+    return _rapikan(potongan)
+
+
+def _pecah(teks: str, penanda: str) -> list[tuple[str, str]]:
+    hasil, awal = [], 0
+    while awal < len(teks):
+        akhir = min(awal + MAKS_POTONGAN, len(teks))
+        if akhir < len(teks):
+            titik = teks.rfind(". ", awal, akhir)
+            if titik > awal + MIN_POTONGAN:
+                akhir = titik + 1         # potong di akhir kalimat
+        hasil.append((penanda, teks[awal:akhir].strip()))
+        awal = max(akhir - OVERLAP, akhir)   # sisakan overlap
+    return hasil
+
+
+def _rapikan(potongan: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    if not potongan:
+        return []
+    rapih = [potongan[0]]
+    for penanda, isi in potongan[1:]:
+        if len(isi) < MIN_POTONGAN and rapih:
+            p, teks = rapih[-1]
+            rapih[-1] = (p, teks + " " + isi)
+        else:
+            rapih.append((penanda, isi))
+    return rapih
+
+
+def indeks_berkas(jalur: str, judul: str) -> int:
+    teks = open(jalur, "r", encoding="utf-8").read()
+    daftar = potong(teks)
+
+    with psycopg.connect(DSN) as koneksi:
+        register_vector(koneksi)
+        with koneksi.cursor() as cur:
+            cur.execute(
+                "insert into dokumen (sumber, judul) values (%s, %s) "
+                "on conflict do nothing returning id", (jalur, judul))
+            baris = cur.fetchone()
+            if baris is None:
+                # dokumen sudah ada: hapus potongannya, indeks ulang
+                cur.execute("select id from dokumen where sumber = %s", (jalur,))
+                dokumen_id = cur.fetchone()[0]
+                cur.execute("delete from potongan where dokumen_id = %s", (dokumen_id,))
+            else:
+                dokumen_id = baris[0]
+
+            for urutan, (penanda, isi) in enumerate(daftar):
+                cur.execute(
+                    "insert into potongan (dokumen_id, urutan, teks, penanda, embedding) "
+                    "values (%s, %s, %s, %s, %s) "
+                    "on conflict (dokumen_id, urutan) do update set teks = excluded.teks, "
+                    "penanda = excluded.penanda, embedding = excluded.embedding",
+                    (dokumen_id, urutan, isi, penanda, sematkan(isi)))
+    return len(daftar)
+```
+
+Bagian yang paling sering salah pada pipeline seperti ini bukan embedding-nya, melainkan **idempotensi**: menjalankan ulang menggandakan data. Perhatikan `on conflict (dokumen_id, urutan) do update` pada `potongan` dan penanganan dokumen yang sudah ada — dua baris itu yang membuat pipeline aman dijalankan berkali-kali.
+
+## Pencarian, dan mengapa hasilnya perlu diurutkan ulang
+
+```python
+# cari.py
+import requests
+import psycopg
+from pgvector.psycopg import register_vector
+
+OLLAMA = "http://localhost:11434"
+DSN = "postgresql://localhost/agentku"
+AMBANG = 0.30          # di bawah ini: anggap tidak ditemukan
+
+
+def sematkan(teks: str) -> list[float]:
+    r = requests.post(f"{OLLAMA}/api/embeddings",
+                      json={"model": "nomic-embed-text", "prompt": teks}, timeout=180)
+    r.raise_for_status()
+    return r.json()["embedding"]
+
+
+def cari(pertanyaan: str, k: int = 20) -> list[dict]:
+    """Ambil k potongan terdekat. k sengaja lebih besar dari yang dikirim ke model."""
+    with psycopg.connect(DSN) as koneksi:
+        register_vector(koneksi)
+        with koneksi.cursor() as cur:
+            cur.execute(
+                "select penanda, teks, 1 - (embedding <=> %s) as kemiripan "
+                "from potongan order by embedding <=> %s limit %s",
+                (sematkan(pertanyaan), sematkan(pertanyaan), k))
+            return [{"penanda": p, "teks": t, "kemiripan": float(s)}
+                    for p, t, s in cur.fetchall()]
+
+
+def urut_ulang(pertanyaan: str, calon: list[dict], ambil: int = 5) -> list[dict]:
+    """Reranking memakai model: cocokkan pertanyaan dengan tiap potongan."""
+    nilai = []
+    for c in calon:
+        r = requests.post(f"{OLLAMA}/api/chat", json={
+            "model": "qwen2.5:7b-instruct",
+            "messages": [{
+                "role": "user",
+                "content": (f"Pertanyaan: {pertanyaan}\n\nPotongan:\n{c['teks'][:800]}\n\n"
+                            "Apakah potongan ini membantu menjawab pertanyaan? "
+                            "Jawab satu angka 0 sampai 10, tanpa penjelasan."),
+            }],
+            "stream": False,
+            "options": {"temperature": 0.0},
+        }, timeout=180)
+        try:
+            skor = float("".join(ch for ch in r.json()["message"]["content"]
+                                 if ch.isdigit() or ch == ".") or 0)
+        except ValueError:
+            skor = 0.0
+        nilai.append({**c, "skor_ulang": min(skor, 10)})
+
+    nilai.sort(key=lambda x: (-x["skor_ulang"], -x["kemiripan"]))
+    return [n for n in nilai[:ambil] if n["kemiripan"] >= AMBANG]
+```
+
+**Mengapa perlu `urut_ulang`?** Pencarian vektor membandingkan pertanyaan dengan potongan secara terpisah — ia tidak tahu apakah potongan itu *benar-benar menjawab* pertanyaan, hanya bahwa topiknya berdekatan. Reranking memakai model untuk menilai satu per satu, dan hasilnya hampir selalu lebih baik untuk dijadikan dasar jawaban.
+
+Biayanya: `k` panggilan model kecil per pertanyaan. Itu sebabnya `k` sengaja dibatasi (di sini 20) dan reranking memakai model 7B, bukan model besar. Kalau anggaranmu ketat, ambil `k = 10`.
+
+<Callout tipe="peringatan" judul="Kemiripan kosinus bukan ukuran keyakinan">
+Skor kemiripan 0.82 tidak berarti "82% yakin". Ia hanya berarti "dua vektor ini berdekatan di ruang vektor". Kalau pertanyaannya sama sekali tidak ada hubungannya dengan isi dokumen, retrieval tetap akan mengembalikan potongan dengan skor tertinggi — karena ia selalu mengembalikan sesuatu.
+
+Karena itu, retrieval yang baik selalu punya **ambang**: kalau skor terbaik di bawah ambang, jawabannya "tidak ditemukan dalam dokumen", bukan mengarang dari potongan yang kebetulan paling mirip.
+</Callout>
+
+## Kutipan sumber — yang membedakan alat bantu dari kotak ajaib
+
+```python
+# jawab.py
+import requests
+from cari import cari, urut_ulang
+
+OLLAMA = "http://localhost:11434"
+
+
+def jawab(pertanyaan: str) -> dict:
+    calon = urut_ulang(pertanyaan, cari(pertanyaan))
+    if not calon:
+        return {"jawaban": "Tidak ditemukan dalam dokumen yang tersedia.",
+                "kutipan": [], "dipakai": 0}
+
+    konteks = "\n\n".join(
+        f"[{i + 1}] ({c['penanda']}) {c['teks']}" for i, c in enumerate(calon))
+
+    r = requests.post(f"{OLLAMA}/api/chat", json={
+        "model": "qwen2.5:7b-instruct",
+        "messages": [{
+            "role": "user",
+            "content": (
+                "Jawab pertanyaan berdasarkan potongan berikut. "
+                "Sebutkan nomor potongan yang kamu pakai dalam tanda kurung siku, "
+                "misalnya [2]. Kalau potongan tidak menjawab pertanyaan, katakan "
+                "bahwa jawabannya tidak ada di dalam dokumen.\n\n"
+                f"{konteks}\n\nPertanyaan: {pertanyaan}"
+            ),
+        }],
+        "stream": False,
+        "options": {"temperature": 0.1},
+    }, timeout=180)
+
+    return {
+        "jawaban": r.json()["message"]["content"],
+        "kutipan": [{"penanda": c["penanda"], "kemiripan": round(c["kemiripan"], 3)}
+                    for c in calon],
+        "dipakai": len(calon),
+    }
+```
+
+Memaksa model menyebut nomor potongan melakukan dua hal sekaligus: pengguna bisa memeriksa sendiri, dan **kamu bisa mendeteksi halusinasi** — kalau model menyebut `[7]` padahal hanya ada 5 potongan, ia mengarang.
+
+## Mengukur kualitas retrieval
+
+Ini bagian yang membedakan sistem yang bisa dipercaya dari yang hanya "terasa bagus". Kamu butuh **set emas**: sekitar 20 sampai 30 pertanyaan yang kamu tahu sendiri potongan mana yang seharusnya ditemukan.
+
+```python
+# evaluasi.py
+from cari import cari, urut_ulang
+
+SET_EMAS = [
+    {"tanya": "Berapa batas waktu pelaporan?", "penanda": "Pasal 4 ayat (2)"},
+    {"tanya": "Siapa yang menandatangani berita acara?", "penanda": "Pasal 7"},
+    # ... isi sampai 20–30 butir
+]
+
+
+def recall_at_k(k: int = 5) -> float:
+    """Seberapa sering potongan yang benar masuk ke dalam k hasil teratas."""
+    benar = 0
+    for butir in SET_EMAS:
+        hasil = urut_ulang(butir["tanya"], cari(butir["tanya"]), ambil=k)
+        if any(h["penanda"] == butir["penanda"] for h in hasil):
+            benar += 1
+    return benar / len(SET_EMAS)
+
+
+def recall_tanpa_rerank(k: int = 5) -> float:
+    benar = 0
+    for butir in SET_EMAS:
+        hasil = cari(butir["tanya"], k=k)
+        if any(h["penanda"] == butir["penanda"] for h in hasil):
+            benar += 1
+    return benar / len(SET_EMAS)
+
+
+if __name__ == "__main__":
+    print(f"recall@5 tanpa rerank : {recall_tanpa_rerank():.0%}")
+    print(f"recall@5 dengan rerank: {recall_at_k():.0%}")
+```
+
+Tulis 25 pertanyaan, jalankan, dan kamu punya angka yang bisa dibandingkan setiap kali mengubah sesuatu. Tanpa angka ini, setiap perubahan pada chunking, model embedding, atau ambang hanyalah perasaan.
+
+Yang perlu diingat saat memakainya:
+
+- **Set emas harus dibuat sebelum kamu melihat hasilnya.** Kalau kamu memilih pertanyaan dari hasil yang sudah bagus, angkanya akan membohongimu.
+- **Ukur tanpa rerank dan dengan rerank.** Kalau keduanya sama, berarti rerank-mu tidak melakukan apa-apa — dan kamu bisa menghemat `k` panggilan model.
+- **Angka yang memburuk setelah "penyempurnaan" itu informasi.** Catat, lalu kembalikan perubahannya.
+
+Pasang keperluannya dulu, lalu jalankan dari berkas tersendiri supaya tidak perlu
+berurusan dengan tanda kutip bersarang:
+
+<Terminal perintah="python -m pip install pgvector psycopg[binary]">
+</Terminal>
+
+```python
+# jalankan.py
+import indeks
+
+print(indeks.indeks_berkas("sop.pdf", "SOP"))
+```
+
+<Terminal perintah="python jalankan.py">
+<div className="text-redup">  47 potongan tersimpan.</div>
+</Terminal>
+
+Kalau `recall@5`-mu di bawah 60%, masalahnya hampir selalu ada di cara memotong, bukan di model embedding. Coba lihat tiga potongan yang dikembalikan untuk pertanyaan yang gagal — biasanya potongan yang benar ada di sana, tapi terpotong tepat sebelum kalimat yang berisi jawabannya.
+
+<Tugas ke="7">
+Bangun retrieval untuk **satu dokumen nyata milikmu** — SOP kantor, peraturan daerah, atau kumpulan catatan rapat. Isi penuh:
+
+1. Skema `skema.sql` di atas, tanpa indeks HNSW dulu.
+2. Pipeline `indeks.py` dengan pemotongan mengikuti struktur dokumenmu (bukan sekadar N karakter).
+3. Pencarian dengan ambang, plus reranking.
+4. Jawaban yang menyertakan kutipan penanda.
+5. `SET_EMAS` berisi **25 pertanyaan** yang kamu buat sendiri, dan laporan `recall@5` sebelum serta sesudah reranking.
+
+Laporkan lima angka: jumlah potongan, `recall@5` tanpa rerank, `recall@5` dengan rerank, rata-rata potongan yang dipakai per jawaban, dan berapa kali ambang menolak menjawab.
+
+Satu syarat yang tidak bisa ditawar: **jangan membuat SET_EMAS setelah melihat hasil pencarian.** Buat pertanyaan dari isi dokumen yang kamu baca sendiri. Kalau tidak, angkamu tidak berarti apa-apa.
+</Tugas>
+
+Selanjutnya: retrieval memberi agent pengetahuan. Yang belum ia punya adalah kemampuan memakai perangkat orang lain dengan aman.

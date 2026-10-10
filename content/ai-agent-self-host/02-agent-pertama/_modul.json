@@ -1,0 +1,7 @@
+{
+  "slug": "agent-pertama",
+  "judul": "Agent pertama: dari menjawab jadi bertindak",
+  "urutan": 2,
+  "ringkasan": "Model yang hanya menjawab itu chatbot. Yang membedakan agent adalah kemampuan memanggil tool. Di sini kamu membangun loop agent pertama yang benar-benar menjalankan sesuatu.",
+  "akses": "gratis"
+}

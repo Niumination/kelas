@@ -1,0 +1,200 @@
+---
+judul: Proyek akhir — satu sistem utuh
+ringkasan: Spesifikasi, rubrik penilaian, dan cara mengumpulkan. Ini syarat terakhir sebelum sertifikat diterbitkan.
+menit: 600
+urutan: 1
+tags: [proyek, penilaian, sertifikat, berbayar]
+---
+
+<Callout tipe="info" judul="Syarat terakhir sertifikat">
+Sertifikat terbit kalau tiga hal terpenuhi: seluruh pelajaran selesai, seluruh kuis lulus, dan proyek akhir ini dinyatakan memenuhi rubrik.
+</Callout>
+
+Proyek akhir bukan latihan tambahan — ia pekerjaan beberapa hari, bukan satu duduk. Karena itulah estimasinya sepuluh jam, jauh di atas pelajaran lain di kelas ini. Rencana tujuh hari ada di bawah kalau kamu ingin pembagian yang terarah.
+
+Ia adalah jawaban atas pertanyaan yang akan ditanyakan orang lain begitu kamu menunjukkan sistemmu: **"ini jalan di mana, apa batasnya, dan apa yang terjadi kalau ia gagal?"**
+
+Tiga pertanyaan itu yang membedakan demo dari sistem. Maka itu pula yang dinilai.
+
+## Pilih satu dari tiga jalur
+
+Pilih yang paling dekat dengan pekerjaanmu yang sebenarnya. Semua jalur dinilai dengan rubrik yang sama.
+
+### Jalur A — Asisten dokumen internal
+
+Agent yang menjawab pertanyaan dari kumpulan dokumen milikmu (SOP, peraturan, manual), lengkap dengan kutipan sumber.
+
+Cocok kalau kamu punya tumpukan dokumen yang selama ini dicari manual.
+
+### Jalur B — Otomatisasi bertahap
+
+Agent yang menjalankan rangkaian tugas berulang: mengambil data, memproses, menulis hasil, dan melaporkan.
+
+Cocok kalau pekerjaanmu punya rutinitas yang jelas dan membosankan.
+
+### Jalur C — Asisten analisis data
+
+Agent yang menjawab pertanyaan tentang kumpulan data (CSV, database) dan menampilkan bukti perhitungannya.
+
+Cocok kalau kamu lebih sering berurusan dengan angka daripada teks.
+
+## Yang wajib ada
+
+Tidak peduli jalur mana yang kamu pilih, enam hal ini harus ada:
+
+1. **Berjalan sendiri di mesinmu** — model lokal lewat Ollama, atau kombinasi lokal dan cloud dengan alasan yang tertulis.
+2. **Minimal tiga tool**, dengan tingkat izin yang berbeda — satu aman, satu butuh persetujuan, satu yang sengaja dilarang.
+3. **Batas giliran dan batas waktu** yang ditegakkan di kode, bukan di prompt.
+4. **Jejak audit** — setiap tindakan agent tercatat dan bisa ditelusuri per ID permintaan.
+5. **Lima kasus di eval set**, termasuk **minimal satu yang harus ditolak.**
+6. **README** yang menjelaskan cara menjalankan, memantau, dan memulihkan.
+
+Yang tidak dinilai: seberapa canggih modelnya, seberapa besar sistemnya, atau seberapa bagus tampilannya.
+
+## Struktur repositori yang disarankan
+
+Bentuk ini bukan keharusan, tetapi ia membuat kelima pemeriksa di atas mudah ditemukan oleh siapa pun yang menilai:
+
+```
+nama-proyek/
+├── README.md              ← cara jalan, cara pantau, cara pulih
+├── requirements.txt
+├── compose.yaml           ← kalau memakai kontainer
+├── agent/
+│   ├── kontrak.py         ← dataclass Langkah, Rencana, HasilLangkah
+│   ├── registry.py        ← deklarasi + izin tool
+│   ├── alat/              ← satu berkas per tool
+│   ├── pagar.py           ← lapis izin
+│   ├── batas.py           ← lapis laju & anggaran
+│   └── audit.py           ← jejak
+├── prompt/
+│   └── planner.txt        ← versinya dihitung dari isinya
+├── eval/
+│   ├── kasus.json
+│   ├── baseline.json
+│   └── laporan-terakhir.json
+├── log/                   ← .gitignore, kecuali contohnya
+└── contoh/                ← data contoh yang bisa dijalankan langsung
+```
+
+Dua hal yang paling sering membuat penilai kesulitan, dan keduanya diatasi oleh struktur di atas:
+
+- **Berkas `eval/laporan-terakhir.json` ikut dikumpulkan.** Yang dinilai bukan cuma kodenya, melainkan bukti bahwa kodenya pernah dijalankan dan hasilnya seperti apa.
+- **Direktori `contoh/` berisi data yang bisa dipakai langsung.** Penilai tidak punya dokumenmu; tanpa data contoh, ia tidak bisa menjalankan apa pun.
+
+## Rencana tujuh hari
+
+Kalau kamu tidak yakin mulai dari mana, pakai pembagian ini. Tiap hari punya satu hasil yang bisa ditunjukkan.
+
+| Hari | Fokus | Hasil yang selesai |
+|---|---|---|
+| 1 | Jalur & data | satu dokumen atau kumpulan data nyata, dan tiga pertanyaan yang harus bisa dijawab |
+| 2 | Tiga tool | registry dengan tiga tool berbeda tingkat izin |
+| 3 | Pagar & batas | `pagar.py` + `batas.py`, dibuktikan dengan percobaan A dan B dari modul B5 |
+| 4 | Jejak audit | setiap tindakan tercatat, bisa ditelusuri per ID permintaan |
+| 5 | Eval set | lima kasus, termasuk satu penolakan; percobaan C lulus |
+| 6 | README | tiga pertanyaan terjawab: cara jalan, pantau, pulih |
+| 7 | Bersih-bersih | hapus kunci, jalankan ulang dari direktori kosong, pastikan lulus |
+
+Hari ketujuh itu yang paling sering dilewatkan dan paling menentukan: **hapus direktori proyekmu, clone ulang dari repositorinya, dan jalankan persis seperti tertulis di README.** Kalau ia tidak hidup, README-mu belum selesai — sekecil apa pun yang tertinggal.
+
+## Kerangka README
+
+```markdown
+# Nama proyek
+
+Satu paragraf: masalah apa yang diselesaikan, untuk siapa.
+
+## Menjalankan
+
+```bash
+git clone ... && cd ...
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+ollama pull qwen2.5:7b-instruct
+python -m agent
+```
+
+Butuh: Python 3.11+, Ollama yang berjalan di 11434, RAM 8 GB.
+Tidak perlu: kunci API pihak ketiga (semua berjalan lokal).
+
+## Memantau
+
+- `curl localhost:8080/health | jq` → status model, database, disk
+- `tail -f log/audit.jsonl | jq`    → jejak tindakan
+- `python eval_lari.py`             → skor evaluasi
+
+## Memulihkan
+
+Cadangan: `bash backup.sh` (keadaan agent + database, tiap jam).
+Pemulihan: `cat /backup/db-TERBARU.sql.gz | gunzip | psql -U app agent`
+Bobot model tidak dicadangkan — unduh ulang dengan `ollama pull`.
+
+## Batas yang sengaja dipasang
+
+- `jalankan_shell` — DILARANG, ditolak di kode
+- `kirim_http` — butuh sesi berizin lebih tinggi
+- Jalur berkas hanya boleh di dalam `./ruang-kerja`
+- Maksimum 8 langkah, 2 percobaan per langkah, 180 detik per permintaan
+```
+
+Bagian "Batas yang sengaja dipasang" sengaja dicantumkan di kerangka. Kalau kamu tidak bisa menulis bagian itu dengan jujur, sistemmu belum punya batas — dan itu berarti belum memenuhi syarat kedua.
+
+## Yang membuat proyek gagal
+
+Daftar ini disusun dari kegagalan yang paling sering terjadi, diurutkan sesuai frekuensinya:
+
+| Kegagalan | Mengapa sering terjadi |
+|---|---|
+| Tidak ada kasus penolakan di eval set | Terlalu fokus pada "bisakah ia menjawab" |
+| Batas cuma ada di prompt | Instruksi dianggap pagar pembatas, padahal hanya harapan |
+| Tidak bisa dijalankan orang lain | Tidak ada README, atau bergantung pada jalur berkas absolut di laptopmu |
+| Jejak audit tidak ada | Baru terasa perlu setelah ada keluhan, bukan sebelum |
+| Tool tanpa batas wilayah | Argumen jalur berkas tidak pernah divalidasi |
+
+## Cara menilai
+
+Proyek lulus kalau tiga kriteria inti terpenuhi, tanpa satu pun kegagalan fatal.
+
+**Kriteria inti** (semuanya harus ya):
+
+- [ ] Berjalan dari awal sampai akhir tanpa perlu kode tambahan di luar README
+- [ ] Batas giliran dan batas waktu benar-benar menghentikan agent yang berputar-putar
+- [ ] Jejak audit memuat tool, argumen, dan hasilnya per permintaan
+- [ ] Eval set punya minimal satu kasus yang harus ditolak, dan agent menolaknya
+- [ ] README menjawab: cara jalan, cara pantau, cara pulih
+
+**Kegagalan fatal** (satu saja cukup untuk mengulang):
+
+- [ ] Agent bisa menjalankan perintah shell tanpa persetujuan
+- [ ] Jalur berkas tidak divalidasi sehingga bisa keluar dari wilayah kerja
+- [ ] Kunci API ada di dalam repositori
+- [ ] Contoh kode di README tidak bisa dijalankan
+
+## Cara mengumpulkan
+
+1. Taruh proyeknya di repositori publik (GitHub atau sejenisnya), dengan README di bagian atas.
+2. Isi deskripsi singkat: masalah yang diselesaikan, jalur yang dipilih, dan satu hal yang paling kamu pelajari.
+3. Sertakan hasil menjalankan eval set-mu — bukan hanya kodenya.
+
+<Callout tipe="peringatan" judul="Plagiarisme">
+Sertifikat yang sudah terbit bisa dibatalkan kalau proyek akhirnya ternyata bukan karyamu. Mengambil contoh kode dari materi kelas ini justru dianjurkan — itulah gunanya. Yang tidak boleh adalah mengumpulkan repositori orang lain dengan namamu di atasnya.
+</Callout>
+
+<Tugas ke="12">
+Kumpulkan proyek akhirmu. Sebelum mengirim, jalankan pemeriksaan ini sendiri — semuanya harus hijau:
+
+1. **Clone ulang ke direktori kosong**, lalu jalankan persis seperti tertulis di README. Tidak boleh ada langkah yang hanya ada di ingatanmu.
+2. **Jalankan eval set-mu**, dan sertakan `eval/laporan-terakhir.json`.
+3. **Buktikan tiga percobaan** dari modul B5 masih lulus di repositori yang baru di-clone: tindakan terlarang ditolak, laju dibatasi, dan instruksi berbahaya di dalam dokumen tidak memicu panggilan HTTP keluar.
+4. **Periksa kegagalan fatal satu per satu**: tidak ada shell tanpa persetujuan, jalur berkas divalidasi, tidak ada kunci di repositori, dan contoh di README bisa dijalankan.
+5. **Tulis tiga paragraf** di deskripsi repositori: masalah yang diselesaikan, jalur yang dipilih, dan satu hal yang paling kamu pelajari.
+
+Paragraf ketiga adalah yang paling sering diisi asal-asalan, padahal yang paling sering dibaca orang lain. Ceritakan satu hal yang tidak kamu duga sebelum mengerjakannya — itu tanda bahwa kamu benar-benar menjalankannya sendiri.
+</Tugas>
+
+## Yang terjadi setelahnya
+
+Proyek akhir ini bisa langsung kamu pakai sebagai bahan portofolio. Kalau kamu berencana menawarkan versi instansi ke organisasimu, bagian README tentang cara memantau dan memulihkan biasanya yang paling menentukan — itu yang tidak dimiliki kebanyakan demo AI.
+
+Dan kalau kamu sudah sampai di sini, kamu tidak lagi sekadar "pernah memakai AI". Kamu punya sistem yang berjalan di mesinmu sendiri, dengan batas yang bisa kamu jelaskan, dan jejak yang bisa kamu pertanggungjawabkan. Itu yang membedakan orang yang mencoba AI dari orang yang membangunnya.

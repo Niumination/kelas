@@ -1,0 +1,209 @@
+---
+judul: Agent pertama — tool calling
+ringkasan: Model yang hanya menjawab itu chatbot. Yang membedakan agent adalah kemampuan memanggil tool. Di sini kamu menulis loop agent pertama yang benar-benar menjalankan sesuatu di mesinmu.
+menit: 35
+urutan: 3
+tags: [agent, tool-calling, python, loop]
+---
+
+Sampai di sini, modelmu hanya bisa menjawab. Ia tahu banyak hal, tapi tidak bisa **melakukan** apa pun di luar dirinya. Tool calling adalah jembatannya.
+
+## Apa yang sebenarnya terjadi
+
+Banyak yang membayangkan model "menjalankan kode". Tidak. Yang terjadi jauh lebih sederhana dan justru lebih berguna:
+
+1. Kamu kirim pertanyaan **bersama daftar tool** yang tersedia beserta skema argumennya.
+2. Model menjawab bukan dengan teks, melainkan dengan **niat**: "panggil tool X dengan argumen Y".
+3. **Kode kamu** yang menjalankan tool itu. Bukan modelnya.
+4. Hasilnya kamu kirim kembali ke model.
+5. Model menjawab dalam bahasa manusia, atau meminta tool lain dipanggil.
+
+Langkah 3 adalah yang paling penting: **model tidak pernah menyentuh mesinmu**. Ia hanya mengajukan permintaan, dan kode kamu yang memutuskan apakah permintaan itu dijalankan. Ini fondasi dari semua pembahasan keamanan di modul B5.
+
+```
+┌─────────┐   niat panggil tool   ┌──────────────┐
+│  Model  │ ─────────────────────▶│  Kode kamu   │
+│ (Ollama)│◀───────────────────── │  (eksekutor) │
+└─────────┘   hasil eksekusi      └──────────────┘
+                                         │
+                                         ▼
+                                  sistem berkas, API,
+                                  database — milikmu
+```
+
+## Skema tool
+
+Tool dideklarasikan dalam bentuk JSON Schema. Kuncinya ada pada **deskripsi**: model memilih tool hampir seluruhnya berdasarkan deskripsi yang kamu tulis, bukan nama fungsinya.
+
+```python
+TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "baca_berkas",
+            "description": (
+                "Membaca isi berkas teks di komputer. "
+                "Gunakan ini kalau pengguna menanyakan isi sebuah berkas. "
+                "Jangan gunakan untuk menulis atau mengubah berkas."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "jalur": {
+                        "type": "string",
+                        "description": "Jalur berkas, misalnya /home/user/catatan.txt",
+                    }
+                },
+                "required": ["jalur"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "hitung",
+            "description": (
+                "Menghitung ekspresi matematika sederhana. "
+                "Pakai ini untuk perhitungan apa pun, jangan menghitung sendiri."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ekspresi": {
+                        "type": "string",
+                        "description": "Ekspresi matematika, misalnya 25 * 4 + 10",
+                    }
+                },
+                "required": ["ekspresi"],
+            },
+        },
+    },
+]
+```
+
+Perhatikan kalimat "jangan menghitung sendiri". Tanpa itu, model 7B akan sering mengabaikan tool `hitung` dan menjawab dari ingatannya — dengan hasil yang kadang meleset. Model kecil butuh dorongan eksplisit.
+
+## Eksekutor: bagian yang kamu pegang
+
+```python
+import ast
+import operator
+import os
+import json
+import requests
+
+OLLAMA = "http://localhost:11434/api/chat"
+MODEL = "qwen2.5:7b-instruct"
+AKAR = os.path.abspath("./ruang-kerja")   # batas wilayah kerja
+
+_OPS = {
+    ast.Add: operator.add, ast.Sub: operator.sub,
+    ast.Mult: operator.mul, ast.Div: operator.truediv,
+    ast.Pow: operator.pow, ast.USub: operator.neg,
+}
+
+def hitung_aman(ekspresi: str) -> float:
+    """Evaluasi aritmatika tanpa eval() — eval() pada input model adalah celah RCE."""
+    def jalan(node):
+        if isinstance(node, ast.Expression):
+            return jalan(node.body)
+        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+            return node.value
+        if isinstance(node, ast.BinOp):
+            return _OPS[type(node.op)](jalan(node.left), jalan(node.right))
+        if isinstance(node, ast.UnaryOp):
+            return _OPS[type(node.op)](jalan(node.operand))
+        raise ValueError(f"Ekspresi tidak diizinkan: {ast.dump(node)}")
+    return jalan(ast.parse(ekspresi, mode="eval"))
+
+def baca_berkas(jalur: str) -> str:
+    """Baca berkas, tapi hanya di dalam ruang-kerja."""
+    penuh = os.path.abspath(os.path.join(AKAR, jalur))
+    if not penuh.startswith(AKAR + os.sep):
+        return "DITOLAK: jalur di luar ruang kerja."
+    if not os.path.isfile(penuh):
+        return f"Berkas tidak ada: {jalur}"
+    with open(penuh, "r", encoding="utf-8") as f:
+        return f.read()[:8000]     # potong: konteks modelmu terbatas
+
+EKSEKUTOR = {"baca_berkas": baca_berkas, "hitung": hitung_aman}
+```
+
+Dua hal di atas sengaja tidak ditulis dengan cara yang paling pendek:
+
+- `hitung_aman` memakai `ast` **bukan `eval()`**. Menjalankan `eval()` pada string yang dihasilkan model berarti memberi model akses menjalankan kode apa pun di prosesmu. Ini kesalahan paling umum di tutorial agent.
+- `baca_berkas` memeriksa bahwa hasil `abspath` masih berada di dalam `AKAR`. Tanpa itu, argumen `../../../etc/passwd` akan lolos.
+
+## Loop agent
+
+```python
+def jalankan_agent(pertanyaan: str, maksimum: int = 5) -> str:
+    pesan = [{"role": "user", "content": pertanyaan}]
+    for giliran in range(maksimum):
+        r = requests.post(OLLAMA, json={
+            "model": MODEL,
+            "messages": pesan,
+            "tools": TOOLS,
+            "stream": False,
+            "options": {"temperature": 0.1},
+        }, timeout=180)
+        r.raise_for_status()
+        pesan_baru = r.json()["message"]
+        pesan.append(pesan_baru)
+
+        panggilan = pesan_baru.get("tool_calls") or []
+        if not panggilan:
+            return pesan_baru.get("content", "(tidak ada jawaban)")
+
+        for tc in panggilan:
+            nama = tc["function"]["name"]
+            argumen = tc["function"]["arguments"]
+            if isinstance(argumen, str):
+                argumen = json.loads(argumen)
+            fn = EKSEKUTOR.get(nama)
+            hasil = fn(**argumen) if fn else f"Tool tidak dikenal: {nama}"
+            print(f"  [{giliran}] {nama}({argumen}) -> {str(hasil)[:80]}")
+            pesan.append({"role": "tool", "content": str(hasil)})
+
+    return "Berhenti: mencapai batas giliran."
+
+if __name__ == "__main__":
+    os.makedirs(AKAR, exist_ok=True)
+    print(jalankan_agent("Ada berkas apa saja di ruang kerja? Baca catatan.txt lalu kalikan jumlah karakternya dengan 3."))
+```
+
+Tiga baris yang paling sering dilupakan pemula:
+
+- **`messages` harus terus bertambah.** Kalau kamu mengirim ulang hanya pertanyaan awal tiap giliran, model akan memanggil tool yang sama berulang kali tanpa henti.
+- **Hasil tool dikirim dengan `role: "tool"`**, bukan `role: "user"`. Salah peran membuat model mengira hasilnya adalah perintah baru darimu.
+- **Ada batas giliran.** Tanpa `maksimum`, agent yang bingung akan berputar selamanya dan menghabiskan konteks.
+
+<Callout tipe="peringatan" judul="Model kecil sering menghasilkan argumen yang rusak">
+Pada model 7B, sekitar satu dari sepuluh panggilan bisa saja tidak valid: nama tool salah ketik, argumen bukan JSON, atau kunci yang hilang. Jangan berasumsi `json.loads` selalu berhasil.
+
+Pola yang benar: bungkus parsing dalam `try/except`, dan kalau gagal, kirim kembali pesan errornya ke model. Model yang diberi tahu "argumenmu bukan JSON yang valid, coba lagi" biasanya berhasil di percobaan kedua. Kita membahas retry dan *fallback* yang lebih rapi di modul B6.
+</Callout>
+
+## Uji agent-mu
+
+Buat dulu ruang kerjanya dan isi dengan sesuatu:
+
+<Terminal perintah="mkdir -p ruang-kerja && printf 'Ollama jalan di port 11434.\nModel favorit: qwen2.5:7b-instruct.\n' > ruang-kerja/catatan.txt && python agent.py">
+<div className="text-redup">  [0] baca_berkas(jalur="catatan.txt") -&gt; Ollama jalan di port 11434...</div>
+<div className="text-hijau">Agent menjawab dalam bahasa Indonesia...</div>
+</Terminal>
+
+Kalau agent-mu langsung menjawab tanpa memanggil tool sama sekali, kemungkinan besar modelnya bukan varian *instruct* atau tidak mendukung tool calling. Cek dengan model yang memang mendukungnya:
+
+<Terminal perintah="ollama show qwen2.5:7b-instruct | grep -i -A2 capabilities">
+</Terminal>
+
+<Tugas ke="3">
+ Tambahkan **satu tool baru** ke agent-mu: `ringkas_direktori` yang mengembalikan daftar nama berkas di `ruang-kerja` beserta ukurannya.
+
+Lalu uji dengan pertanyaan yang **mengharuskan dua tool dipanggil berurutan** — misalnya "berkas mana yang paling besar, dan apa isinya?". Kalau agent-mu bisa menjawabnya, kamu sudah punya agent yang bekerja: ia merencanakan, bertindak, melihat hasilnya, lalu menjawab.
+
+Catat juga berapa kali ia gagal dalam 10 percobaan. Angka itu akan kamu pakai lagi di modul B6 saat membahas evaluasi.
+</Tugas>
+
+Selanjutnya: agent-mu akan butuh kunci API untuk tool pihak ketiga. Menyimpannya dengan aman tidak sesederhana yang terlihat.

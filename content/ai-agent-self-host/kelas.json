@@ -1,0 +1,28 @@
+{
+  "slug": "ai-agent-self-host",
+  "judul": "AI Agent Self-Host",
+  "tagline": "Bangun asisten AI yang jalan di mesinmu sendiri — dari `ollama run` sampai siap produksi.",
+  "deskripsi": "Kelas berbahasa Indonesia tentang membangun sistem AI agent yang berjalan di mesin sendiri: Ollama untuk model lokal, tool calling, orkestrasi multi-agent, memory & retrieval, guardrails, sampai deploy produksi. Fondasinya gratis. Bagian yang mengubahnya jadi sistem siap pakai — orkestrasi, keamanan, dan produksi — berbayar.",
+  "bahasa": "id",
+  "status": "pra-rilis",
+  "harga": 99000,
+  "hargaAsli": 499000,
+  "tahapHarga": "Early bird — 50 kuota pertama",
+  "estimasiJam": 15,
+  "level": "Menengah (nyaman dengan terminal & satu bahasa pemrograman)",
+  "prasyarat": [
+    "Bisa memakai terminal dan menginstal perangkat lunak sendiri",
+    "Paham satu bahasa pemrograman (contoh di kelas memakai Python dan TypeScript)",
+    "Laptop dengan RAM minimal 8 GB (16 GB nyaman, GPU opsional)"
+  ],
+  "yangDidapat": [
+    "2 modul fondasi gratis (4 pelajaran): dari instalasi sampai agent pertama yang benar-benar memanggil tool",
+    "4 modul berbayar (8 pelajaran): orkestrasi multi-agent, memory & retrieval, tool ecosystem, guardrails, deploy produksi, evaluasi, dan proyek akhir",
+    "Repositori contoh yang bisa di-clone dan dijalankan",
+    "Kuis per modul untuk menguji pemahaman",
+    "Sertifikat bernomor unik yang bisa diverifikasi publik",
+    "Akses pembaruan materi mengikuti rilis besar Ollama"
+  ],
+  "instruktur": "Afrizal Munthe (Niumination) — Pranata Komputer @ Diskominfo Aceh Tengah",
+  "instrukturSingkat": "Afrizal Munthe"
+}

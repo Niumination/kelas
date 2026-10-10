@@ -1,0 +1,501 @@
+---
+judul: Anatomi agent — observer, planner, executor, verifier
+ringkasan: Memecah satu agent raksasa menjadi empat peran yang bisa diuji sendiri-sendiri. Termasuk kapan satu agent justru lebih baik daripada empat.
+menit: 28
+urutan: 1
+tags: [arsitektur, peran, berbayar, python]
+---
+
+Agent-mu sekarang bisa memanggil tool. Kalau kamu menambah tool terus, ada titik di mana ia mulai sering memilih yang salah. Titik itu datang lebih cepat dari yang kamu kira.
+
+Modul ini memecah agent tunggal itu menjadi empat peran yang masing-masing bisa diuji, diganti modelnya, dan diperbaiki sendiri-sendiri — tanpa menyentuh tiga peran lainnya.
+
+## Mengapa agent tunggal mulai macet
+
+Agent dengan sepuluh tool di satu prompt punya masalah yang bisa diprediksi: semakin banyak tool, semakin sering model memilih yang salah. Pada model 7B, penurunan akurasi pemilihan tool mulai terasa jauh sebelum sepuluh — seringnya di sekitar lima sampai tujuh tool aktif.
+
+Ada dua jalan keluar: **membatasi tool yang terlihat** (routing), atau **memecah agent berdasarkan peran** (orkestrasi). Modul ini membahas yang kedua.
+
+## Empat peran yang dipakai di seluruh kelas
+
+```
+        ┌──────────┐
+        │ Observer │  mengamati state: berkas, log, hasil tool
+        └────┬─────┘
+             ▼
+        ┌──────────┐
+        │ Planner  │  menyusun rencana bertahap, bukan satu langkah
+        └────┬─────┘
+             ▼
+        ┌──────────┐
+        │ Executor │  menjalankan satu langkah, mengembalikan hasil
+        └────┬─────┘
+             ▼
+        ┌──────────┐
+        │ Verifier │  memeriksa hasil — lulus atau minta ulang
+        └────┬─────┘
+             └──▶ kembali ke Planner kalau gagal
+```
+
+Pemisahan ini bukan soal estetika arsitektur. Ia memberi tiga hal yang tidak mungkin kamu dapat dari satu prompt raksasa:
+
+1. **Kegagalan menjadi lokal.** Kalau `Executor` gagal, kamu tahu di mana. Kalau satu prompt gagal, kamu hanya tahu "hasilnya salah".
+2. **Setiap peran bisa memakai model berbeda.** `Planner` boleh memakai model besar di cloud; `Executor` yang hanya memformat JSON cukup pakai model 7B lokal. Ini penghematan biaya terbesar dalam sistem agent nyata.
+3. **Verifier bisa diuji tanpa menjalankan apa pun.** Kamu bisa memberinya rencana dan hasil palsu, lalu memeriksa apakah ia menolak yang seharusnya ditolak.
+
+### Kontrak antar-peran
+
+Kunci agar empat peran ini tidak berubah jadi empat agen yang saling mengobrol tanpa arah adalah **kontrak data yang kaku**. Setiap peran menerima dan mengembalikan struktur yang sama:
+
+```python
+# kontrak.py
+from pydantic import BaseModel, Field
+from typing import Literal
+
+class Langkah(BaseModel):
+    id: int
+    tool: str
+    argumen: dict = Field(default_factory=dict)
+    alasan: str          # WAJIB: mengapa tool ini dipilih
+
+class Rencana(BaseModel):
+    tujuan: str
+    langkah: list[Langkah]
+
+class HasilLangkah(BaseModel):
+    id: int
+    sukses: bool
+    keluaran: str
+    error: str | None = None
+
+class Keputusan(BaseModel):
+    status: Literal["lulus", "ulang", "gagal"]
+    catatan: str
+```
+
+Field `alasan` pada `Langkah` adalah yang paling sering dilewatkan padahal paling murah: memaksa model menulis alasannya menurunkan pilihan tool yang asal-asalan, dan memberimu jejak yang bisa dibaca manusia saat menelusuri kegagalan.
+
+Empat peran, empat berkas. Mulai dari yang paling mudah.
+
+## Observer — melihat tanpa menelan segalanya
+
+Tugas `Observer` satu-satunya: mengubah keadaan mesin menjadi potongan teks pendek yang bisa dibaca model. Kesalahan paling umum di sini adalah menganggap "observasi" berarti "baca semua berkas lalu tempelkan ke prompt".
+
+```python
+# observer.py
+import os
+from kontrak import BaseModel
+
+class Keadaan(BaseModel):
+    akar: str
+    berkas: list[dict]        # [{nama, ukuran, cuplikan}]
+    catatan: str = ""
+
+AKAR = os.path.abspath("./ruang-kerja")
+PANJANG_CUPLIKAN = 200       # karakter per berkas, bukan seluruh isi
+MAKS_BERKAS = 40
+
+def amati(akar: str = AKAR, catatan: str = "") -> Keadaan:
+    """Kumpulkan keadaan ruang kerja dalam bentuk ringkas.
+
+    Sengaja tidak mengembalikan isi berkas utuh: isi utuh masuk ke konteks
+    hanya ketika Executor benar-benar membacanya lewat tool.
+    """
+    if not os.path.isdir(akar):
+        return Keadaan(akar=akar, berkas=[], catatan="Direktori belum ada.")
+
+    masuk = []
+    for nama in sorted(os.listdir(akar))[:MAKS_BERKAS]:
+        penuh = os.path.join(akar, nama)
+        if not os.path.isfile(penuh):
+            continue
+        ukuran = os.path.getsize(penuh)
+        try:
+            with open(penuh, "r", encoding="utf-8", errors="replace") as f:
+                awal = f.read(PANJANG_CUPLIKAN)
+        except OSError:
+            awal = "(tidak dapat dibaca)"
+        masuk.append({"nama": nama, "ukuran": ukuran, "cuplikan": awal})
+
+    return Keadaan(akar=akar, berkas=masuk, catatan=catatan)
+```
+
+Perhatikan dua batas yang sengaja dipasang: `MAKS_BERKAS` dan `PANJANG_CUPLIKAN`. Tanpa keduanya, satu direktori berisi log 2 MB akan memenuhi konteks sebelum `Planner` sempat berpikir.
+
+<Callout tipe="peringatan" judul="Observer bukan tempat membaca isi berkas">
+Kalau `Observer` sudah menyalin isi berkas ke konteks, `Planner` akan merasa tidak perlu memanggil tool `baca_berkas` — padahal berkasnya bisa jadi sudah berubah sejak diamati.
+
+Aturan praktis: **Observer melaporkan apa yang ada, Executor yang membaca isinya.** Observer hanya boleh membawa cuplikan secukupnya untuk membantu Planner memilih langkah.
+</Callout>
+
+`Observer` tidak memanggil model sama sekali. Ia murah, deterministik, dan bisa diuji tanpa Ollama menyala — itu ciri khas peran yang baik.
+
+## Planner — rencana sebagai data, bukan prosa
+
+`Planner` menerima tujuan dan keadaan, lalu mengembalikan `Rencana`. Perbedaannya dengan agent tunggal ada pada satu hal: ia **dilarang menjawab**, hanya boleh merencanakan.
+
+```python
+# planner.py
+import json
+import requests
+from pydantic import ValidationError
+from kontrak import Rencana
+
+OLLAMA = "http://localhost:11434/api/chat"
+MODEL_PLANNER = "qwen2.5:7b-instruct"
+
+PROMPT_PLANNER = """Kamu adalah perencana. Kamu tidak menjawab pertanyaan,
+kamu hanya menyusun rencana langkah demi langkah.
+
+Keadaan ruang kerja:
+{keadaan}
+
+Tool yang tersedia:
+{tool}
+
+Buat rencana untuk tujuan berikut: {tujuan}
+
+Aturan:
+- Maksimal {maks_langkah} langkah.
+- Setiap langkah wajib menyertakan "alasan" satu kalimat.
+- Kalau tujuan sudah tercapai oleh keadaan saat ini, kembalikan daftar langkah kosong.
+- Jawab HANYA dengan JSON yang sesuai skema."""
+
+
+def rencanakan(tujuan: str, keadaan: str, deskripsi_tool: str,
+               maks_langkah: int = 6, percobaan: int = 3) -> Rencana | None:
+    skema = Rencana.model_json_schema()
+    for ke in range(percobaan):
+        r = requests.post(OLLAMA, json={
+            "model": MODEL_PLANNER,
+            "messages": [{
+                "role": "user",
+                "content": PROMPT_PLANNER.format(
+                    keadaan=keadaan, tool=deskripsi_tool,
+                    tujuan=tujuan, maks_langkah=maks_langkah),
+            }],
+            "format": skema,          # Ollama memaksa keluaran sesuai skema
+            "stream": False,
+            "options": {"temperature": 0.0},
+        }, timeout=180)
+        r.raise_for_status()
+        try:
+            return Rencana.model_validate_json(r.json()["message"]["content"])
+        except (ValidationError, json.JSONDecodeError, KeyError) as e:
+            # Beri tahu model kesalahannya — percobaan kedua biasanya benar.
+            print(f"  [planner] percobaan {ke + 1} gagal: {type(e).__name__}")
+            continue
+    return None
+```
+
+Dua keputusan di atas layak diingat:
+
+- **`format` dikirim dengan skema JSON**, bukan sekadar diminta di prompt. Ollama akan mengonstrain keluaran agar sesuai `Rencana.model_json_schema()`. Ini jauh lebih andal daripada berharap model patuh pada kalimat "jawab dengan JSON".
+- **`temperature: 0.0`** pada peran yang menghasilkan struktur. Kreativitas tidak berguna di sini; konsistensi yang kamu butuhkan.
+
+Kalau `rencanakan` mengembalikan `None` setelah tiga percobaan, anggap itu kegagalan peran dan hentikan tugas — jangan jatuh ke rencana darurat yang tidak direncanakan siapa pun.
+
+## Executor — satu langkah, satu hasil, satu batas
+
+`Executor` menjalankan tepat satu `Langkah`. Ia tidak tahu tujuan akhir, tidak melihat rencana, dan tidak boleh mengambil keputusan sendiri.
+
+```python
+# executor.py
+import os
+from kontrak import Langkah, HasilLangkah
+
+AKAR = os.path.abspath("./ruang-kerja")
+MAKS_KELUARAN = 4000          # karakter; keluaran dipotong, jangan dibuang
+
+
+def _aman(jalur: str) -> str | None:
+    """Kembalikan jalur absolut kalau masih di dalam AKAR, selain itu None."""
+    penuh = os.path.abspath(os.path.join(AKAR, jalur))
+    return penuh if penuh.startswith(AKAR + os.sep) else None
+
+
+def baca_berkas(jalur: str) -> str:
+    penuh = _aman(jalur)
+    if penuh is None:
+        raise PermissionError("jalur di luar ruang kerja")
+    if not os.path.isfile(penuh):
+        raise FileNotFoundError(jalur)
+    with open(penuh, "r", encoding="utf-8", errors="replace") as f:
+        return f.read(MAKS_KELUARAN)
+
+
+def tulis_berkas(jalur: str, isi: str) -> str:
+    penuh = _aman(jalur)
+    if penuh is None:
+        raise PermissionError("jalur di luar ruang kerja")
+    with open(penuh, "w", encoding="utf-8") as f:
+        f.write(isi)
+    return f"tersimpan: {jalur} ({len(isi)} karakter)"
+
+
+REGISTER = {"baca_berkas": baca_berkas, "tulis_berkas": tulis_berkas}
+
+DESKRIPSI_TOOL = """- baca_berkas(jalur): membaca isi berkas teks di ruang kerja
+- tulis_berkas(jalur, isi): menulis berkas teks baru di ruang kerja"""
+
+
+def eksekusi(langkah: Langkah) -> HasilLangkah:
+    fungsi = REGISTER.get(langkah.tool)
+    if fungsi is None:
+        return HasilLangkah(id=langkah.id, sukses=False, keluaran="",
+                            error=f"tool tidak dikenal: {langkah.tool}")
+    try:
+        keluaran = fungsi(**langkah.argumen)
+        return HasilLangkah(id=langkah.id, sukses=True,
+                            keluaran=str(keluaran)[:MAKS_KELUARAN])
+    except Exception as e:
+        # Jangan diamkan: kirim pesan errornya ke Verifier dan Planner.
+        return HasilLangkah(id=langkah.id, sukses=False, keluaran="",
+                            error=f"{type(e).__name__}: {e}")
+```
+
+Hal yang paling sering dilupakan pada `Executor`: **argumen datang dari model, jadi mereka tidak bisa dipercaya.** Pemeriksaan `_aman()` di atas bukan formalitas — tanpa itu, argumen `../../../.ssh/id_rsa` akan lolos.
+
+<Callout tipe="bahaya" judul="Jangan tambahkan tool 'jalankan perintah shell' di sini">
+Tool seperti `jalankan_shell(perintah)` membuat `Executor` setara dengan memberi model akses terminal. Itu bukan orkestrasi, itu menyerahkan mesin.
+
+Kalau suatu langkah benar-benar butuh perintah shell, ia harus menjadi tool **tertentu** dengan argumen terbatas — misalnya `jalankan_pytest(direktori)`, bukan perintah bebas. Alasan teknisnya dibahas lengkap di modul B5.
+</Callout>
+
+## Verifier — hakim yang bisa diuji tanpa menjalankan apa pun
+
+`Verifier` memutuskan apakah sebuah `HasilLangkah` benar-benar memenuhi maksud `Langkah`-nya. Sekilas ini terdengar seperti pekerjaan model, tapi sebagian besar pemeriksaan yang berguna **tidak perlu model sama sekali**.
+
+```python
+# verifier.py
+import requests
+from kontrak import Langkah, HasilLangkah, Keputusan
+
+OLLAMA = "http://localhost:11434/api/chat"
+MODEL_VERIFIER = "qwen2.5:7b-instruct"
+
+
+def periksa_pasti(langkah: Langkah, hasil: HasilLangkah) -> Keputusan | None:
+    """Pemeriksaan deterministik. Kembalikan None kalau tidak bisa diputuskan."""
+    if not hasil.sukses:
+        return Keputusan(status="ulang",
+                         catatan=f"eksekusi gagal: {hasil.error}")
+    if not hasil.keluaran.strip():
+        return Keputusan(status="ulang", catatan="keluaran kosong")
+    if langkah.tool == "tulis_berkas" and "tersimpan" not in hasil.keluaran:
+        return Keputusan(status="ulang", catatan="penulisan tidak terkonfirmasi")
+    return None
+
+
+def verifikasi(langkah: Langkah, hasil: HasilLangkah) -> Keputusan:
+    cepat = periksa_pasti(langkah, hasil)
+    if cepat is not None:
+        return cepat                      # tidak perlu panggil model
+
+    r = requests.post(OLLAMA, json={
+        "model": MODEL_VERIFIER,
+        "messages": [{
+            "role": "user",
+            "content": (
+                f"Tujuan langkah: {langkah.alasan}\n"
+                f"Tool: {langkah.tool}({langkah.argumen})\n"
+                f"Hasil: {hasil.keluaran[:1500]}\n\n"
+                "Apakah hasil ini memenuhi tujuan langkah tersebut? "
+                "Jawab 'lulus' atau 'ulang' disertai satu kalimat alasan."
+            ),
+        }],
+        "stream": False,
+        "options": {"temperature": 0.0},
+    }, timeout=180)
+    r.raise_for_status()
+    teks = r.json()["message"]["content"].strip().lower()
+    if teks.startswith("lulus"):
+        return Keputusan(status="lulus", catatan=teks[:200])
+    return Keputusan(status="ulang", catatan=teks[:200])
+```
+
+Pemisahan `periksa_pasti` / `verifikasi` memberimu dua keuntungan sekaligus:
+
+| Yang diperiksa | Cara | Biaya |
+|---|---|---|
+| Eksekusi gagal, keluaran kosong | kode (`periksa_pasti`) | nol |
+| Format JSON tidak sesuai | kode | nol |
+| Berkas benar-benar berubah | kode (`os.stat`) | nol |
+| Hasil menjawab maksud langkah | model kecil | murah |
+| Hasil konsisten dengan tujuan akhir | model besar | mahal |
+
+Baris terakhir itu sengaja jarang dipakai: memeriksa konsistensi terhadap tujuan akhir setiap langkah akan membuat biayanya berlipat. Cukup lakukan di akhir, sekali.
+
+Keuntungan terbesar dari bentuk ini: kamu bisa menguji `Verifier` **tanpa menjalankan agent**.
+
+```python
+# uji_verifier.py — berjalan tanpa Ollama untuk kasus deterministik
+from kontrak import Langkah, HasilLangkah, Keputusan
+from verifier import periksa_pasti
+
+langkah = Langkah(id=1, tool="baca_berkas", argumen={"jalur": "a.txt"},
+                  alasan="membaca isi berkas")
+
+assert periksa_pasti(langkah, HasilLangkah(id=1, sukses=False, keluaran="",
+                     error="Berkas tidak ada")).status == "ulang"
+assert periksa_pasti(langkah, HasilLangkah(id=1, sukses=True,
+                     keluaran="   ")).status == "ulang"
+assert periksa_pasti(langkah, HasilLangkah(id=1, sukses=True,
+                     keluaran="isi")) is None
+print("Verifier lulus uji deterministik.")
+```
+
+## Menyatukan keempatnya — loop yang tahu kapan berhenti
+
+```python
+# orkestrator.py
+from kontrak import Keputusan
+from observer import amati, AKAR
+from planner import rencanakan
+from executor import eksekusi, DESKRIPSI_TOOL
+from verifier import verifikasi
+
+MAKS_LANGKAH = 8        # total langkah yang boleh dijalankan
+MAKS_ULANG = 2          # percobaan ulang per langkah
+
+
+def _tanda(langkah) -> str:
+    return f"{langkah.tool}:{sorted(langkah.argumen.items())}"
+
+
+def jalankan(tujuan: str) -> str:
+    jejak: list[str] = []
+    riwayat_tanda: list[str] = []
+
+    keadaan = amati(AKAR)
+    rencana = rencanakan(tujuan, keadaan.model_dump_json(), DESKRIPSI_TOOL)
+    if rencana is None:
+        return "GAGAL: Planner tidak menghasilkan rencana yang valid."
+
+    for langkah in rencana.langkah[:MAKS_LANGKAH]:
+        tanda = _tanda(langkah)
+        if riwayat_tanda.count(tanda) >= 2:
+            # Tindakan yang sama tiga kali = agent berputar. Hentikan.
+            jejak.append(f"[{langkah.id}] dihentikan: pengulangan {tanda}")
+            break
+
+        for percobaan in range(MAKS_ULANG + 1):
+            hasil = eksekusi(langkah)
+            keputusan = verifikasi(langkah, hasil)
+            jejak.append(f"[{langkah.id}] {langkah.tool} -> {keputusan.status}"
+                         f" ({keputusan.catatan[:60]})")
+            if keputusan.status == "lulus":
+                break
+        else:
+            jejak.append(f"[{langkah.id}] menyerah setelah {MAKS_ULANG + 1} percobaan")
+            break
+
+        riwayat_tanda.append(tanda)
+
+    return "\n".join(jejak)
+```
+
+Tiga pembatas yang membuat loop ini tidak berputar selamanya:
+
+- **`MAKS_LANGKAH`** membatasi jumlah langkah, bukan jumlah giliran percakapan.
+- **`MAKS_ULANG`** membatasi percobaan per langkah.
+- **Deteksi pengulangan** lewat `riwayat_tanda`: langkah dengan tool dan argumen identik yang muncul tiga kali hampir selalu berarti agent bingung, bukan berusaha keras.
+
+<Callout tipe="tips" judul="Catat jejaknya, bukan hanya hasil akhir">
+`jejak` di atas adalah berkas paling berharga saat sistemmu gagal di produksi. Tanpa jejak, yang kamu punya hanya "hasilnya salah". Dengan jejak, kamu tahu langkah ke-3 memanggil `tulis_berkas` dan `Verifier` menganggapnya lulus padahal isinya kosong.
+
+Simpan jejak ini ke berkas log sejak hari pertama. Memasangnya belakangan jauh lebih sulit.
+</Callout>
+
+## Rencana statis vs rencana dinamis
+
+`jalankan()` di atas memakai **rencana statis**: `Planner` dipanggil sekali, lalu rencananya dijalankan sampai habis. Alternatifnya **rencana dinamis**: setelah setiap langkah, `Planner` dipanggil ulang dengan keadaan terbaru.
+
+| | Rencana statis | Rencana dinamis |
+|---|---|---|
+| Biaya | murah — satu kali panggil Planner | mahal — panggil ulang tiap langkah |
+| Bisa menyesuaikan diri | tidak bisa, buta terhadap hasil antara | bisa |
+| Risiko | rencana meleset sejak awal | bisa bolak-balik tanpa konvergen |
+| Cocok untuk | tugas yang keadaannya jarang berubah | tugas yang hasil langkahnya tak terduga |
+| Mudah diuji | sangat — rencana bisa disimpan & diputar ulang | sulit — perlu merekam seluruh lintasan |
+
+Aturan yang kupakai: **mulai dengan rencana statis.** Naik ke dinamis hanya kalau kamu punya bukti bahwa rencana statis meleset karena keadaan berubah — bukan karena Planner-nya kurang pintar. Kalau terpaksa dinamis, simpan setiap revisi rencana ke log; tanpa itu, kegagalan dinamis hampir mustahil direproduksi.
+
+## Mengukur biaya per peran
+
+Ini bagian yang paling sering dilewatkan, padahal dampaknya langsung ke dompet dan ke waktu tunggu. Ollama mengembalikan jumlah token setiap kali dipanggil — simpan saja.
+
+```python
+# biaya.py
+from collections import defaultdict
+
+PAKAI = defaultdict(lambda: {"panggil": 0, "prompt": 0, "eval": 0})
+
+def catat(peran: str, respons: dict) -> None:
+    p = PAKAI[peran]
+    p["panggil"] += 1
+    p["prompt"] += respons.get("prompt_eval_count", 0)
+    p["eval"] += respons.get("eval_count", 0)
+
+def lapor() -> None:
+    total = sum(v["prompt"] + v["eval"] for v in PAKAI.values()) or 1
+    print(f"{'peran':<10} {'panggil':>8} {'token':>10} {'porsi':>8}")
+    for peran, v in sorted(PAKAI.items()):
+        token = v["prompt"] + v["eval"]
+        print(f"{peran:<10} {v['panggil']:>8} {token:>10} {token / total:>7.1%}")
+```
+
+Panggil `catat("planner", r.json())` di setiap tempat kamu memanggil model, lalu cetak `lapor()` di akhir tugas. Isi tabelnya akan berbeda di setiap mesin dan setiap jenis tugas, jadi **ukur punyamu sendiri** — jangan percaya angka dari artikel orang lain, termasuk yang sering beredar di konferensi.
+
+Yang biasanya terlihat setelah diukur:
+
+- `Planner` jarang dipanggil tapi selalu mahal — konteksnya paling besar.
+- `Verifier` dipanggil paling sering, dan sebagian besar seharusnya tidak perlu model (pindahkan ke `periksa_pasti`).
+- `Executor` seringkali tidak memanggil model sama sekali. Kalau ia memanggil model, tanyakan dulu mengapa.
+
+Tiga temuan itu biasanya cukup untuk memangkas biaya separuhnya tanpa mengganti model.
+
+## Kapan satu agent lebih baik daripada empat
+
+Pemisahan peran bukan selalu jawaban. Empat peran berarti empat kali lipat tempat gagal, dan kalau tugasmu sederhana, itu kemewahan yang merugikan.
+
+**Tetap pakai satu agent kalau:**
+
+- jumlah tool lima atau kurang, dan akurasi pemilihannya sudah bisa diterima
+- tugasnya linear: satu sampai tiga langkah, tidak ada cabang
+- tidak ada langkah yang berisiko merusak — salah paling banter salah jawab
+- tidak ada siapa pun yang akan menanyakan "kenapa ia melakukan itu"
+
+**Baru pecah jadi empat peran kalau:**
+
+- ada langkah yang tidak boleh diulang atau tidak boleh gagal (menulis ke database, mengirim email, menghapus berkas)
+- kamu perlu menjelaskan keputusannya ke orang lain
+- biaya mulai terasa, dan kamu perlu memakai model murah di sebagian tahap
+- kamu ingin menguji satu tahap tanpa menjalankan keseluruhan sistem
+
+Aturan terakhir: **jangan pecah peran untuk mengatasi akurasi yang buruk.** Kalau satu agent tidak kunjung akurat, menambah tiga peran di atasnya hanya melipatgandakan kerapuhan. Akurasi buruk diobati dengan skema tool yang lebih jelas, contoh yang lebih baik, atau model yang lebih besar — bukan dengan arsitektur yang lebih rumit.
+
+<Terminal perintah="python uji_verifier.py && python orkestrator.py">
+<div className="text-redup">Verifier lulus uji deterministik.</div>
+<div className="text-redup">[1] tulis_berkas -> lulus (tersimpan: ringkasan.md...)</div>
+<div className="text-redup">[2] baca_berkas -> ulang (berkas tidak ada)</div>
+<div className="text-hijau">[3] baca_berkas -> lulus (Ollama jalan di...)</div>
+</Terminal>
+
+Kalau `Planner` terus menghasilkan rencana kosong untuk tujuan yang jelas butuh tindakan, cek dulu apakah `DESKRIPSI_TOOL` benar-benar sampai ke prompt-nya — kegagalan Planner lebih sering berasal dari deskripsi tool yang tidak terbaca daripada dari modelnya.
+
+<Tugas ke="5">
+Pecah agent-mu dari modul G3 menjadi empat berkas: `observer.py`, `planner.py`, `executor.py`, `verifier.py` dengan kontrak persis seperti di atas.
+
+Lalu tambahkan satu tool baru, `hitung` (memakai `ast`, bukan `eval()`), dan jalankan sepuluh tujuan berbeda. Untuk setiap tujuan, simpan rencana dan jejaknya ke `log/<nomor>.json` dalam bentuk:
+
+```json
+{ "tujuan": "...", "rencana": [], "jejak": [], "status": "lulus|gagal" }
+```
+
+Yang kamu cari: **berapa dari sepuluh tujuan itu selesai tanpa satu pun langkah diulang.** Catat angkanya — ia akan kamu bandingkan dengan sistem dua agent di pelajaran berikutnya, dan dipakai lagi di modul B6 saat membahas evaluasi.
+
+Kalau ada tujuan yang gagal berulang pada langkah yang sama, jangan buru-buru mengganti model. Baca `alasan` yang ditulis Planner pada langkah itu. Sering sekali ia memberitahumu persis apa yang salah paham.
+</Tugas>
+
+Selanjutnya: empat peran yang rapi masih berjalan di satu proses. Begitu kamu ingin dua agent bekerja bersama, masalahnya berubah jenis.
