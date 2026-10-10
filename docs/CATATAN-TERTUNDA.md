@@ -13,23 +13,23 @@ Penanggung jawab:
 
 | ID | Item | Penanggung jawab | Status |
 |---|---|---|---|
-| T-01 | Buat project Supabase & isi kredensial | Kamu + Hermes | ⏸ TERTUNDA |
-| T-02 | Jalankan migrasi ke Supabase | Hermes | ⏸ TERTUNDA |
-| T-03 | Aktifkan OAuth GitHub & Google | Kamu | ⏸ TERTUNDA |
+| T-01 | Buat project Supabase & isi kredensial | Kamu + Hermes | ✅ **SELESAI 11 Okt 2026** — `kelas-niumination` / `xjefqbhavevfkhcunwmc` |
+| T-02 | Jalankan migrasi ke Supabase | Hermes | ✅ **SELESAI 11 Okt 2026** — 6 migrasi, 22 pelajaran, 23 soal |
+| T-03 | Aktifkan OAuth GitHub & Google | Kamu | ✅ **SELESAI 11 Okt 2026** — diuji pemilik di live site |
 | T-04 | Verifikasi akun bisnis Midtrans | Kamu | ⏸ TERTUNDA — **mulai minggu ke-5** |
-| T-05 | Buat repo GitHub baru | Kamu + Hermes | ⏸ TERTUNDA |
-| T-06 | Deploy Vercel + set env | Hermes | ⏸ TERTUNDA |
-| T-07 | Pasang DNS `kelas` CNAME | Kamu | ⏸ TERTUNDA |
-| T-08 | Verifikasi contoh kode materi dengan Ollama nyata | Hermes | ⏸ TERTUNDA |
-| T-09 | Uji transaksi Midtrans Rp 10.000 | Kamu | ⏸ TERTUNDA |
-| T-10 | Uji gitleaks di repo lokal | Hermes | ⏸ TERTUNDA |
+| T-05 | Buat repo GitHub baru | Kamu + Hermes | ✅ **SELESAI 9 Okt 2026** — `Niumination/kelas` private |
+| T-06 | Deploy Vercel + set env | Hermes | ✅ **SELESAI 9 Okt 2026** — `kelas-hazel.vercel.app` |
+| T-07 | Pasang DNS `kelas` CNAME | Kamu | ✅ **SELESAI 10 Okt 2026** — `kelas.niumination.web.id` LIVE |
+| T-08 | Verifikasi contoh kode materi dengan Ollama nyata | Hermes | ⏸ TERTUNDA — Ollama belum terpasang di laptop |
+| T-09 | Uji transaksi Midtrans Rp 10.000 | Kamu | ⏸ TERTUNDA — butuh T-04 |
+| T-10 | Uji gitleaks di repo lokal | Hermes | ✅ **SELESAI 9 Okt 2026** — 8 temuan semua `.next/`, nol secret |
 | T-11 | Soft launch & sebar ke komunitas | Kamu | ⏸ TERTUNDA |
 | T-12 | Kirim penawaran B2B ke instansi | Kamu | ⏸ TERTUNDA |
-| T-13 | Terbitkan sertifikat pertama (butuh sistem jalan) | Hermes | ⏸ TERTUNDA |
-| T-14 | Tinjau tampilan sertifikat dengan mata (PDF & kembaran HTML) | Kamu | ⏸ TERTUNDA |
+| T-13 | Terbitkan sertifikat pertama | Hermes | ✅ **SELESAI 11 Okt 2026** — `NIUM-2026-AI-AS34PT`, verify 200 |
+| T-14 | Tinjau tampilan sertifikat dengan mata (PDF & kembaran HTML) | Kamu | ⏸ TERTUNDA — butuh mata manusia |
 | T-15 | Persetujuan proyek akhir oleh instruktur | Kamu | ⏸ TERTUNDA — manual |
-| T-16 | Uji pindai QR dari sertifikat yang sudah dicetak/dibuka di layar | Kamu | ⏸ TERTUNDA |
-| T-17 | SMTP produksi untuk magic link Supabase Auth | Kamu + Hermes | ⏸ TERTUNDA |
+| T-16 | Uji pindai QR dari sertifikat yang sudah dicetak/dibuka di layar | Kamu | ⏸ TERTUNDA — butuh kamera |
+| T-17 | SMTP produksi untuk magic link Supabase Auth | Kamu + Hermes | ⏸ TERTUNDA — butuh akun Resend |
 
 ---
 
