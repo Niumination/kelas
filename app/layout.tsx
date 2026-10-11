@@ -1,33 +1,49 @@
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
 import './globals.css'
 import { SiteHeader } from '@/components/SiteHeader'
 import { SiteFooter } from '@/components/SiteFooter'
 
+const URL_SITUS =
+  process.env.NEXT_PUBLIC_SITE_URL ??
+  (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://kelas.niumination.web.id')
+
+export const viewport: Viewport = {
+  themeColor: '#f4f2ea',
+  colorScheme: 'light',
+}
+
 export const metadata: Metadata = {
-  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000'),
+  metadataBase: new URL(URL_SITUS),
   title: {
-    default: 'Kelas Niumination — AI Agent Self-Host',
+    default: 'Kelas Niumination — Bangun AI agent di mesinmu sendiri',
     template: '%s · Kelas Niumination',
   },
   description:
-    'Kelas gratis dan berbayar berbahasa Indonesia untuk membangun sistem AI yang berjalan di mesinmu sendiri: Ollama, tool calling, multi-agent, guardrails, sampai deploy produksi.',
+    'Belajar membangun AI agent dari model lokal sampai sistem siap produksi. Fondasi gratis, materi berbahasa Indonesia, docs-driven, dan tanpa video wajib.',
   keywords: ['kelas AI', 'AI agent', 'self-host', 'Ollama', 'Indonesia', 'Niumination', 'LLM lokal'],
   authors: [{ name: 'Afrizal Munthe (Niumination)' }],
   openGraph: {
-    title: 'Kelas Niumination — AI Agent Self-Host',
+    title: 'Kelas Niumination — Bangun AI agent di mesinmu sendiri',
     description:
-      'Fondasi gratis, produksi berbayar. Bangun agent AI yang jalan di mesinmu sendiri, tanpa kirim data ke mana-mana.',
+      'Fondasi gratis, produksi berbayar. Pelajari cara membangun AI agent yang berjalan di mesinmu sendiri.',
+    url: URL_SITUS,
+    siteName: 'Kelas Niumination',
     type: 'website',
     locale: 'id_ID',
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'Kelas Niumination — AI Agent Self-Host',
+    description: 'Belajar membangun AI agent dari model lokal hingga sistem siap produksi.',
   },
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="id">
-      <body className="min-h-screen">
+      <body className="flex min-h-screen flex-col">
         <SiteHeader />
-        <main>{children}</main>
+        <main className="flex-1">{children}</main>
         <SiteFooter />
       </body>
     </html>

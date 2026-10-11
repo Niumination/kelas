@@ -1,26 +1,22 @@
 import { SUPABASE_AKTIF } from '@/lib/supabase/konfigurasi'
 
-/**
- * Ditampilkan saat env Supabase belum diisi: konten tetap terbaca penuh,
- * hanya fitur akun & pembayaran yang nonaktif.
- */
+/** Akun dan transaksi nonaktif tanpa env Supabase; konten gratis tetap terbaca. */
 export function CatatanDemo({ ringkas = false }: { ringkas?: boolean }) {
   if (SUPABASE_AKTIF) return null
+
   return (
-    <div
-      className="mb-6 rounded-lg border px-4 py-3 text-sm"
-      style={{ borderColor: 'rgba(251,191,36,0.35)', background: 'rgba(251,191,36,0.06)' }}
-    >
-      <span className="mono text-[0.7rem] font-bold uppercase tracking-wider text-kuning">mode demo</span>
-      {ringkas ? (
-        <span className="ml-2 text-redup">Login & pembayaran nonaktif — materi tetap bisa dibaca.</span>
-      ) : (
-        <p className="mt-1 text-redup">
-          Variabel Supabase belum diisi, jadi akun, progres, dan pembayaran belum menyala. Seluruh materi
-          tetap bisa dibaca. Isi <code className="mono text-teks">.env.local</code> lalu jalankan ulang untuk
-          mengaktifkan fitur penuh (lihat README).
-        </p>
-      )}
+    <div className="mb-6 flex items-start gap-3 rounded-xl border border-kuning/20 bg-kuning/5 px-4 py-3 text-sm">
+      <span className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full bg-kuning/10 text-xs font-bold text-kuning" aria-hidden="true">i</span>
+      <div className="min-w-0">
+        <span className="mono text-[0.63rem] font-bold uppercase tracking-[0.12em] text-kuning">Mode demo</span>
+        {ringkas ? (
+          <span className="ml-2 text-xs leading-5 text-redup">Akun, progres tersimpan, dan pembayaran belum diaktifkan. Materi gratis tetap bisa dibaca.</span>
+        ) : (
+          <p className="mt-1 text-xs leading-6 text-redup">
+            Variabel Supabase belum diisi, jadi login, progres tersimpan, dan pembayaran belum aktif. Materi gratis tetap bisa dibaca. Untuk konfigurasi lengkap, siapkan <code className="mono rounded bg-panel px-1 py-0.5 text-teks">.env.local</code> sesuai README.
+          </p>
+        )}
+      </div>
     </div>
   )
 }

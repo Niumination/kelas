@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { klienServer } from '@/lib/supabase/server'
 
-/** Menukar code OAuth menjadi sesi, lalu mengarahkan ke tujuan. */
+/** Tukar code OAuth menjadi sesi, lalu kembalikan pengguna ke rute lokal yang aman. */
 export async function GET(req: Request) {
   const url = new URL(req.url)
   const code = url.searchParams.get('code')
@@ -15,5 +15,11 @@ export async function GET(req: Request) {
     }
   }
 
-  return NextResponse.redirect(new URL(lanjut.startsWith('/') ? lanjut : '/dashboard', url.origin))
+  let tujuan = new URL('/dashboard', url.origin)
+  if (lanjut.startsWith('/') && !lanjut.startsWith('//')) {
+    const kandidat = new URL(lanjut, url.origin)
+    if (kandidat.origin === url.origin) tujuan = kandidat
+  }
+
+  return NextResponse.redirect(tujuan)
 }

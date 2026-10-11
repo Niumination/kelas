@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
+import Link from 'next/link'
 import { tandaiSelesai } from '@/app/aksi'
 
 interface Props {
@@ -14,16 +15,16 @@ export function TombolSelesai({ slugKelas, jalur, awalSelesai, aktif }: Props) {
   const [selesai, setSelesai] = useState(awalSelesai)
   const [pesan, setPesan] = useState<string | null>(null)
   const [menunggu, mulai] = useTransition()
+  const tujuan = `/belajar/${slugKelas}/${jalur}`
 
   if (!aktif) {
     return (
-      <button
-        disabled
-        title="Masuk untuk menyimpan progres"
-        className="mono cursor-not-allowed rounded-md border border-tepian px-4 py-2 text-sm text-redup"
+      <Link
+        href={`/masuk?lanjut=${encodeURIComponent(tujuan)}`}
+        className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-tepian bg-panel px-4 text-sm font-semibold text-redup transition-colors hover:border-hijau/35 hover:text-hijau-gelap"
       >
-        ✓ Tandai selesai
-      </button>
+        Masuk untuk simpan progres <span aria-hidden="true">→</span>
+      </Link>
     )
   }
 
@@ -32,28 +33,35 @@ export function TombolSelesai({ slugKelas, jalur, awalSelesai, aktif }: Props) {
     setSelesai(nilai)
     setPesan(null)
     mulai(async () => {
-      const hasil = await tandaiSelesai(slugKelas, jalur, nilai)
-      if (!hasil.ok) {
+      try {
+        const hasil = await tandaiSelesai(slugKelas, jalur, nilai)
+        if (!hasil.ok) {
+          setSelesai(!nilai)
+          setPesan(hasil.pesan ?? 'Progres belum tersimpan. Coba lagi.')
+        }
+      } catch {
         setSelesai(!nilai)
-        setPesan(hasil.pesan ?? 'Gagal menyimpan progres')
+        setPesan('Koneksi bermasalah. Periksa sambungan lalu coba lagi.')
       }
     })
   }
 
   return (
-    <div className="flex items-center gap-3">
+    <div className="flex flex-wrap items-center gap-3">
       <button
+        type="button"
         onClick={klik}
         disabled={menunggu}
-        className={`mono rounded-md border px-4 py-2 text-sm transition-colors disabled:opacity-60 ${
+        aria-pressed={selesai}
+        className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border px-4 text-sm font-semibold transition-colors disabled:cursor-wait disabled:opacity-60 ${
           selesai
-            ? 'border-hijau/50 bg-hijau/15 text-hijau hover:bg-hijau/25'
-            : 'border-tepian text-redup hover:border-hijau/40 hover:text-hijau'
+            ? 'border-hijau/20 bg-hijau/10 text-hijau-gelap hover:bg-hijau/15'
+            : 'border-tepian bg-panel text-teks hover:border-hijau/35 hover:text-hijau-gelap'
         }`}
       >
-        {menunggu ? '…' : selesai ? '✓ Selesai' : 'Tandai selesai'}
+        {menunggu ? 'Menyimpan…' : selesai ? '✓ Pelajaran selesai' : 'Tandai selesai'}
       </button>
-      {pesan && <span className="text-xs text-merah">{pesan}</span>}
+      {pesan && <span role="status" className="text-xs text-merah">{pesan}</span>}
     </div>
   )
 }

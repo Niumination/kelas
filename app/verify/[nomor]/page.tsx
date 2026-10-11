@@ -3,7 +3,7 @@ import { HasilVerifikasi } from '@/components/HasilVerifikasi'
 
 export async function generateMetadata({ params }: { params: Promise<{ nomor: string }> }) {
   const { nomor } = await params
-  return { title: `Sertifikat ${decodeURIComponent(nomor)}` }
+  return { title: `Sertifikat ${nomor}` }
 }
 
 export default async function HalamanNomorSertifikat({
@@ -12,16 +12,23 @@ export default async function HalamanNomorSertifikat({
   params: Promise<{ nomor: string }>
 }) {
   const { nomor } = await params
-  const bersih = decodeURIComponent(nomor).trim()
+  const bersih = nomor.trim().slice(0, 100)
 
   return (
-    <div className="mx-auto max-w-2xl px-5 py-16">
-      <h1 className="text-2xl font-bold tracking-tight">Verifikasi sertifikat</h1>
-      <div className="mt-8">
-        <HasilVerifikasi nomor={bersih} />
-      </div>
-      <Link href="/verify" className="mono mt-8 inline-block text-sm text-hijau hover:underline">
-        ← Periksa nomor lain
+    <div className="mx-auto max-w-4xl px-5 py-10 sm:py-14">
+      <nav aria-label="Breadcrumb" className="mono mb-5 flex items-center gap-2 text-[0.65rem] text-redup">
+        <Link href="/verify" className="hover:text-hijau-gelap">Verifikasi sertifikat</Link>
+        <span aria-hidden="true">/</span>
+        <span className="text-teks">Hasil</span>
+      </nav>
+      <header className="mb-7">
+        <p className="kicker text-hijau">CATATAN PUBLIK</p>
+        <h1 className="display-serif mt-3 text-4xl leading-tight sm:text-5xl">Pemeriksaan sertifikat</h1>
+        <p className="mt-3 max-w-xl text-sm leading-6 text-redup">Status dan detail penerbitan untuk nomor yang diminta.</p>
+      </header>
+      <HasilVerifikasi nomor={bersih} />
+      <Link href="/verify" className="group mt-6 inline-flex items-center gap-2 text-sm font-semibold text-hijau-gelap hover:text-hijau">
+        <span className="transition-transform group-hover:-translate-x-1" aria-hidden="true">←</span> Periksa nomor lain
       </Link>
     </div>
   )

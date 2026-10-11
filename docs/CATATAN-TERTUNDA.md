@@ -30,6 +30,7 @@ Penanggung jawab:
 | T-15 | Persetujuan proyek akhir oleh instruktur | Kamu | ⏸ TERTUNDA — manual |
 | T-16 | Uji pindai QR dari sertifikat yang sudah dicetak/dibuka di layar | Kamu | ⏸ TERTUNDA — butuh kamera |
 | T-17 | SMTP produksi untuk magic link Supabase Auth | Kamu + Hermes | ⏸ TERTUNDA — butuh akun Resend |
+| T-18 | Uji visual UI/UX responsif & keyboard pada browser nyata | Kamu + Hermes | ⏸ TERTUNDA — perlu persetujuan visual dan perangkat nyata |
 
 ---
 
@@ -154,3 +155,11 @@ Jalankan berurutan dan catat keluarannya apa adanya. Yang perlu dilaporkan bukan
 **Keadaan sekarang:** QR disandikan sendiri (`lib/qr.mjs`, mode byte, versi 1–6, tingkat koreksi M) dan sudah terbukti identik dengan pustaka referensi serta terbaca jsQR saat diraster. Yang belum teruji adalah rantai paling ujung: **cetak → kamera → buka**.
 **Langkah:** cetak `docs/contoh-sertifikat.pdf` (atau buka di layar), pindai QR-nya dengan kamera ponsel, pastikan membuka `kelas.niumination.web.id/verify/NIUM-2026-AIAGENT-K7Q3MT`.
 **Kalau gagal terpindai:** ukuran QR saat ini 86 pt (≈ 30 mm) dengan modul ≈ 2,1 pt. Naikkan `sisi` di `lib/tata-letak-sertifikat.mjs` (misal ke 100) dan jalankan `npm run contoh`. Jangan turunkan di bawah 70 pt.
+
+---
+
+### T-18 · Uji visual UI/UX responsif & keyboard pada browser nyata
+**Kenapa tertunda:** build dan pengujian statis bisa memastikan route/komponen berjalan, tetapi penilaian rasa visual, interaksi sentuh, dan navigasi keyboard tetap perlu mata serta browser/perangkat nyata. Tidak ada sesi GitHub push atau deploy yang dilakukan dari Arena.
+**Penanggung jawab:** Kamu menilai arah visual dan menyetujui hasil; Hermes menjalankan pemeriksaan pada repo lokal/staging dan membenahi regresi yang ditemukan.
+**Langkah persis:** (1) jalankan `npm run dev` dengan Node 22, atau buka preview dari cabang kerja sebelum merge; (2) periksa `/`, `/kelas`, `/kelas/ai-agent-self-host`, `/harga`, `/masuk`, `/dashboard`, satu pelajaran gratis, satu pelajaran premium saat belum login, `/kuis/ai-agent-self-host/fondasi`, dan `/verify`; (3) ulangi sekurangnya pada lebar 1440 px dan 390 px; (4) di desktop, navigasikan header, form email, radio kuis, dan semua CTA memakai Tab/Shift+Tab/Enter; di ponsel, buka/tutup menu serta accordion kurikulum; (5) pastikan halaman belajar premium tanpa entitlement hanya menampilkan ringkasan—bukan isi MDX; (6) laporkan overflow, fokus yang hilang, teks/kontras yang sulit dibaca, atau transisi yang membingungkan sebelum merge.
+**Catatan integrasi:** login provider/magic link, checkout Midtrans, webhook settlement, dan penerbitan sertifikat live tetap mengikuti T-03, T-04, T-09, T-13, dan T-17; semuanya memerlukan kredensial/perangkat pemilik dan jangan diuji dengan rahasia produksi di sandbox.
