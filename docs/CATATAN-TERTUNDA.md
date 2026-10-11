@@ -31,9 +31,9 @@ Penanggung jawab:
 | T-16 | Uji pindai QR dari sertifikat yang sudah dicetak/dibuka di layar | Kamu | ⏸ TERTUNDA — butuh kamera |
 | T-17 | SMTP produksi untuk magic link Supabase Auth | Kamu + Hermes | ⏸ TERTUNDA — butuh akun Resend |
 | T-18 | Uji visual UI/UX responsif & keyboard pada browser nyata | Kamu + Hermes | ⏸ TERTUNDA — perlu persetujuan visual dan perangkat nyata |
-| T-19 | Terapkan 0007 dan uji sesi/progres Google end-to-end | Hermes + Kamu | ⏸ TERTUNDA — butuh project Supabase, sesi Google, dan deploy yang disetujui |
-| T-20 | Pastikan repo GitHub kembali private | Kamu + Hermes | ⏸ TERTUNDA — akses pemilik repo; pembukaan sebelumnya hanya sementara |
-| T-21 | Tutup audit lisensi skill sebelum distribusi publik | Kamu + Hermes | ⏸ TERTUNDA — beberapa upstream tidak menyertakan lisensi/atribusi lengkap |
+| T-19 | Terapkan 0007 dan uji sesi/progres Google end-to-end | Hermes + Kamu | 🟡 **SEBAGIAN** — 0007 sudah live 12 Okt; sisa uji sesi Google di browser (butuh akun pemilik) |
+| T-20 | Pastikan repo GitHub kembali private | Kamu + Hermes | ✅ **DITUTUP 12 Okt 2026** — keputusan pemilik: repo tetap publik selama pengembangan, belum disebar |
+| T-21 | Tutup audit lisensi skill sebelum distribusi publik | Kamu + Hermes | ✅ **DITUTUP 12 Okt 2026** — keputusan pemilik: skill sudah diverifikasi, tidak perlu diterapkan |
 
 ---
 
@@ -178,11 +178,12 @@ Jalankan berurutan dan catat keluarannya apa adanya. Yang perlu dilaporkan bukan
 **Jika gagal:** catat URL, waktu, teks error, status HTTP, dan nama request yang gagal dari DevTools. Sensor email, cookie, token, anon key, dan semua rahasia sebelum mengirim laporan. Jangan mengirim tangkapan Network yang memuat cookie/token.
 
 ### T-20 · Kembalikan repository menjadi private
-**Kenapa tertunda:** perubahan visibility hanya dapat dilakukan oleh pemilik repo atau operator yang mendapat otorisasi. Repo `Niumination/kelas` dibuka sementara hanya untuk fetch; tidak ada izin untuk membiarkannya publik.
-**Penanggung jawab:** Kamu (pemilik GitHub); Hermes membantu memverifikasi jika diminta.
-**Langkah persis:** buka `github.com/Niumination/kelas` → **Settings → General → Danger Zone → Change repository visibility → Make private**; konfirmasi nama repo jika diminta; lalu buka URL repo di jendela privat tanpa login dan pastikan akses anonim ditolak. Jangan push materi atau perubahan baru sebelum status private dikonfirmasi.
+**Status: DITUTUP 12 Okt 2026 — keputusan pemilik.**
+**Keputusan:** repo `Niumination/kelas` **tetap publik** untuk saat ini. Repo masih dalam pengembangan dan belum disebarkan ke mana pun, sehingga risiko penyebaran materi berbayar dinilai belum nyata. Tidak perlu tindakan.
+**Catatan bila kondisi berubah:** begitu repo mulai disebar, ditautkan publik, atau onboarding peserta luar dimulai, buka kembali keputusan ini — `content/` memuat 6 modul berbayar yang bisa diunduh tanpa login (`raw.githubusercontent.com/...` → HTTP 200). Mitigasi: ubah visibility ke private, atau pindahkan `content/` berbayar ke sumber terpisah yang tidak ikut ke Git.
 
 ### T-21 · Selesaikan lisensi skill sebelum distribusi publik
-**Kenapa tertunda:** beberapa skill dari tiga sumber belum memberikan seluruh bukti lisensi/atribusi yang dibutuhkan di repo lokal; rinciannya ada di `docs/THIRD-PARTY-NOTICES.md`.
-**Penanggung jawab:** Hermes menghubungi/mengecek sumber dan menyiapkan penggantian jika perlu; Kamu menyetujui distribusi.
-**Langkah persis:** (1) konfirmasi lisensi dan notice untuk `next-best-practices`, `next-cache-components`, `next-upgrade`; (2) konfirmasi notice hak cipta untuk `composition-patterns` dan `react-best-practices`; (3) identifikasi sumber/penulis asli `nodejs-best-practices` yang berlabel community dan verifikasi atribusi CC BY 4.0; (4) jika bukti tidak tersedia, hapus skill terkait dari paket yang akan dipublikasikan atau gantikan dengan dokumentasi resmi berlisensi jelas; (5) perbarui `docs/THIRD-PARTY-NOTICES.md` dan lock manifest sesuai perubahan. Jangan mengubah `LICENSE` MIT aplikasi untuk mengklaim hak atas materi pihak ketiga.
+**Status: DITUTUP 12 Okt 2026 — keputusan pemilik.**
+**Keputusan:** skill sudah diverifikasi pemilik dan dinilai **tidak perlu diterapkan**. `.agents/skills/` (166 berkas) + `skills-lock.json` tidak diadopsi ke repo; berkas-berkas itu tetap hanya ada di dalam paket arena.
+**Konsekuensi yang sudah diterima:** `README.md` masih merujuk `.agents/skills/` dan `skills-lock.json` yang tidak ada di repo — biarkan apa adanya sesuai keputusan ini.
+**Catatan bila kondisi berubah:** bila kelak `.agents/` ingin diterapkan, buka kembali audit di `docs/THIRD-PARTY-NOTICES.md` lebih dulu — tiga skill (`next-best-practices`, `next-cache-components`, `next-upgrade`) belum punya deklarasi lisensi, dua belum punya notice hak cipta persis, dan satu berlabel community belum teridentifikasi penulis aslinya.
