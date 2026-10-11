@@ -159,7 +159,10 @@ supabase/migrations/0003_seed.sql
 supabase/migrations/0004_kuis.sql
 supabase/migrations/0005_sertifikat.sql
 supabase/migrations/0006_bank_soal.sql
+supabase/migrations/0007_progres_modul.sql
 ```
+
+**Project `kelas-niumination` yang sudah ada:** catatan menyebut `0001`–`0006` sudah diterapkan. Jangan jalankan ulang; untuk hotfix ini jalankan `0007_progres_modul.sql` saja setelah pemilik menyetujui. Untuk project baru, jalankan semuanya berurutan.
 
 Lalu verifikasi:
 
@@ -174,10 +177,10 @@ select count(*) from information_schema.tables
 
 select proname from pg_proc p
   join pg_namespace n on n.oid = p.pronamespace
-  where n.nspname = 'public' order by 1;   -- harus 15 fungsi
+  where n.nspname = 'public' order by 1;   -- 16 baris: 15 RPC + 1 helper internal
 ```
 
-**Hasil yang diharapkan:** 12 pelajaran · 23 soal · 5 kuis · 6 modul · 13 tabel · 15 fungsi.
+**Hasil yang diharapkan:** 12 pelajaran · 23 soal · 5 kuis · 6 modul · 13 tabel · 15 RPC publik + 1 helper internal (hak EXECUTE helper dicabut).
 
 **Kalau gagal:** migrasi ini sudah diuji di PGlite (`npm run db:uji` hijau). Kalau gagal di Supabase, kemungkinan besar karena perbedaan lingkungan (peran `anon`/`authenticated` sudah ada di sana, atau ekstensi yang belum aktif). **Laporkan pesan error lengkapnya** — jangan menyunting berkas migrasi yang sudah dijalankan.
 
@@ -423,7 +426,7 @@ Kalau `gitleaks` menemukan sesuatu: **cabut kuncinya di penyedia dulu, baru bers
 ## Yang tidak boleh dilakukan Hermes
 
 1. **Jangan mengubah `docs/PRD-kelas-ai-agent.md` §0** (benang merah & enam aturan) tanpa persetujuan. Itu konstitusi proyek.
-2. **Jangan menyunting migrasi yang sudah dijalankan.** Perubahan baru = berkas `0007_*.sql`.
+2. **Jangan menyunting migrasi yang sudah dijalankan.** Perubahan berikutnya setelah `0007` = berkas `0008_*.sql`.
 3. **Jangan menaruh kredensial di kode atau commit.** Hanya `.env.local` dan dashboard.
 4. **Jangan `git push --force` ke `main`.**
 5. **Jangan menghapus berkas di `content/`** tanpa konfirmasi — itu materi, bukan cache.

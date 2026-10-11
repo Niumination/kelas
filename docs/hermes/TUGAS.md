@@ -22,8 +22,8 @@ Salin daftar ini ke `LAPORAN.md` dan centang yang sudah selesai.
 ### Fase 2 — Database & Auth  `→ T-01, T-02, T-03, T-17`
 - [ ] Project Supabase dibuat (terpisah dari project instansi)
 - [ ] `.env.local` terisi, lencana MODE DEMO hilang
-- [ ] Migrasi 0001–0006 dijalankan berurutan
-- [ ] 12 pelajaran · 23 soal · 5 kuis · 6 modul · 13 tabel · 15 fungsi
+- [ ] Migrasi 0001–0007 dijalankan berurutan
+- [ ] 12 pelajaran · 23 soal · 5 kuis · 6 modul · 13 tabel · 15 RPC publik + 1 helper internal
 - [ ] `courses.estimasi_jam=15`; jumlah `lessons.menit=915`; urutan Produksi sama dengan materi
 - [ ] OAuth GitHub & Google aktif  `← Kamu`
 - [ ] Redirect `/auth/callback` terdaftar untuk domain & localhost

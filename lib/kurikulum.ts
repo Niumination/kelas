@@ -158,6 +158,24 @@ export function pelajaranDatar(kelas: Kelas): Pelajaran[] {
   return kelas.modul.flatMap((m) => m.pelajaran)
 }
 
+/** Modul tuntas jika setiap pelajarannya tersimpan dan kuisnya pernah lulus. */
+export function hitungModulTuntas(
+  kelas: Kelas,
+  progres: ReadonlySet<string>,
+  kuisLulus: Iterable<string>,
+): Set<string> {
+  const modulDenganKuisLulus = new Set(kuisLulus)
+  return new Set(
+    kelas.modul
+      .filter((modul) =>
+        modul.pelajaran.length > 0 &&
+        modulDenganKuisLulus.has(modul.slug) &&
+        modul.pelajaran.every((pelajaran) => progres.has(pelajaran.jalur)),
+      )
+      .map((modul) => modul.slug),
+  )
+}
+
 export function cariPelajaran(kelas: Kelas, jalur: string[]): Pelajaran | null {
   const target = jalur.join('/')
   return pelajaranDatar(kelas).find((p) => p.jalur === target) ?? null

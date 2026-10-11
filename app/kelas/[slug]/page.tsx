@@ -1,11 +1,11 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
-import { ambilKelas, daftarKelas } from '@/lib/kurikulum'
+import { ambilKelas, daftarKelas, hitungModulTuntas } from '@/lib/kurikulum'
 import { Kurikulum } from '@/components/Kurikulum'
 import { Lencana } from '@/components/Lencana'
 import { CatatanDemo } from '@/components/CatatanDemo'
 import { TombolBeli } from '@/components/TombolBeli'
-import { penggunaAktif, punyaAkses, progresKelas } from '@/lib/supabase/server'
+import { penggunaAktif, punyaAkses, progresKelas, rekapKuis } from '@/lib/supabase/server'
 import { rupiah, durasiMenit } from '@/lib/format'
 
 export function generateStaticParams() {
@@ -26,8 +26,16 @@ export default async function HalamanKelas({ params }: { params: Promise<{ slug:
   if (!kelas || kelas.status === 'draft') notFound()
 
   const pengguna = await penggunaAktif()
-  const sudahPunya = pengguna ? await punyaAkses(kelas.slug) : false
-  const progres = pengguna ? await progresKelas(kelas.slug) : new Set<string>()
+  const [sudahPunya, progres, ringkasanKuis] = await Promise.all([
+    pengguna ? punyaAkses(kelas.slug) : Promise.resolve(false),
+    pengguna ? progresKelas(kelas.slug) : Promise.resolve(new Set<string>()),
+    pengguna ? rekapKuis(kelas.slug) : Promise.resolve([]),
+  ])
+  const modulTuntas = hitungModulTuntas(
+    kelas,
+    progres,
+    ringkasanKuis.filter((kuis) => kuis.lulus === true).map((kuis) => kuis.modul),
+  )
   const modulGratis = kelas.modul.filter((modul) => modul.akses === 'gratis').length
   const modulPremium = kelas.modul.filter((modul) => modul.akses === 'berbayar').length
 
@@ -134,6 +142,7 @@ export default async function HalamanKelas({ params }: { params: Promise<{ slug:
             <Kurikulum
               kelas={kelas}
               progres={progres}
+              modulTuntas={modulTuntas}
               modeBaca={sudahPunya ? 'semua' : 'gratis-saja'}
               tampilkanKuis={Boolean(pengguna)}
             />

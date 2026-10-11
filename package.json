@@ -38,5 +38,12 @@
     "postcss": "^8.5.0",
     "tailwindcss": "^4.3.3",
     "typescript": "^5.7.0"
+  },
+  "overrides": {
+    "gray-matter": {
+      "js-yaml": {
+        "argparse": "2.0.1"
+      }
+    }
   }
 }

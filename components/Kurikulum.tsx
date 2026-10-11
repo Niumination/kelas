@@ -6,7 +6,9 @@ import { durasiMenit, durasiSingkat } from '@/lib/format'
 interface Props {
   kelas: Kelas
   /** Jalur pelajaran yang sudah selesai (dari database). */
-  progres?: Set<string>
+  progres?: ReadonlySet<string>
+  /** Modul yang semua pelajarannya selesai dan kuisnya pernah lulus. */
+  modulTuntas?: ReadonlySet<string>
   /** Batasi akses materi berbayar untuk pengunjung yang belum punya entitlement. */
   modeBaca?: 'semua' | 'gratis-saja'
   slugAktif?: string
@@ -18,6 +20,7 @@ interface Props {
 export function Kurikulum({
   kelas,
   progres,
+  modulTuntas,
   modeBaca = 'gratis-saja',
   slugAktif,
   ringkas,
@@ -41,7 +44,14 @@ export function Kurikulum({
                   <h3 id={`modul-${modul.slug}`} className="max-w-2xl font-semibold leading-snug tracking-tight sm:text-[1.05rem]">
                     {modul.judul}
                   </h3>
-                  <LencanaAkses akses={modul.akses} />
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {modulTuntas?.has(modul.slug) && (
+                      <span className="mono inline-flex items-center gap-1 rounded-full bg-hijau/10 px-2 py-1 text-[0.56rem] font-bold uppercase tracking-[0.08em] text-hijau-gelap">
+                        <span aria-hidden="true">✓</span> Tuntas
+                      </span>
+                    )}
+                    <LencanaAkses akses={modul.akses} />
+                  </div>
                 </div>
                 {!ringkas && <p className="mt-2 max-w-3xl text-sm leading-6 text-redup">{modul.ringkasan}</p>}
                 {terkunci && (

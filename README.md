@@ -83,11 +83,15 @@ tests/pdf.test.mjs               uji struktur PDF & keterbacaan oleh pdf.js
 tests/qr.test.mjs                uji encoder QR (didekode balik oleh jsQR)
 tests/tata-letak.test.mjs        uji hierarki & batas tata letak sertifikat
 tests/materi.test.mjs            uji integritas MDX, frontmatter, dan nomor tugas
-supabase/migrations/             0001 skema · 0002 RLS · 0003 seed · 0004 kuis · 0005 sertifikat · 0006 bank soal
+supabase/migrations/             0001 skema · 0002 RLS · 0003 seed · 0004 kuis · 0005 sertifikat · 0006 bank soal · 0007 progres modul
+.agents/skills/                  panduan pengembangan opsional (bukan dependensi runtime)
+skills-lock.json                 sumber + SHA-256 bundle skill
+
 docs/
   PRD-kelas-ai-agent.md          PRD + benang merah & aturan ekstensibilitas
   one-pager-instansi.md          penawaran B2B
   CATATAN-TERTUNDA.md            register pekerjaan yang butuh mesin/kredensial lain
+  THIRD-PARTY-NOTICES.md          atribusi dan batas lisensi skill pihak ketiga
   ALUR-KERJA-HERMES.md           protokol serah terima Arena ↔ Hermes
   hermes/PROMPT.md               prompt siap-tempel untuk Hermes Agent
   hermes/TERAPKAN.md             panduan penerapan bertahap ke GitHub/Supabase/Vercel/Midtrans
@@ -138,6 +142,7 @@ Jangan lupa sinkronkan ke database: tambahkan modul/pelajaran yang sama di `supa
    0004_kuis.sql        view aman + penilaian sisi server
    0005_sertifikat.sql  nomor unik + syarat terbit
    0006_bank_soal.sql   23 soal (5 kuis: 4+5+5+4+5)
+   0007_progres_modul.sql   progres modul idempoten, terlepas dari urutan kuis/pelajaran
    ```
 
    Verifikasi: 12 lessons, 23 questions, 5 quizzes, 6 modules, 15 RPC functions; `courses.estimasi_jam=15` dan `sum(lessons.menit)=915`.

@@ -1,12 +1,12 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
-import { ambilKelas, cariPelajaran, tetangga } from '@/lib/kurikulum'
+import { ambilKelas, cariPelajaran, hitungModulTuntas, tetangga } from '@/lib/kurikulum'
 import { Kurikulum } from '@/components/Kurikulum'
 import { MdxIsi } from '@/components/MdxIsi'
 import { TombolSelesai } from '@/components/TombolSelesai'
 import { TombolBeli } from '@/components/TombolBeli'
 import { CatatanDemo } from '@/components/CatatanDemo'
-import { penggunaAktif, punyaAkses, progresKelas } from '@/lib/supabase/server'
+import { penggunaAktif, punyaAkses, progresKelas, rekapKuis } from '@/lib/supabase/server'
 import { rupiah, durasiMenit } from '@/lib/format'
 
 export async function generateMetadata({
@@ -23,12 +23,14 @@ export async function generateMetadata({
 function IsiKurikulum({
   kelas,
   progres,
+  modulTuntas,
   aksesPenuh,
   materiAktif,
   tampilkanKuis,
 }: {
   kelas: NonNullable<ReturnType<typeof ambilKelas>>
-  progres: Set<string>
+  progres: ReadonlySet<string>
+  modulTuntas: ReadonlySet<string>
   aksesPenuh: boolean
   materiAktif: string
   tampilkanKuis: boolean
@@ -56,6 +58,7 @@ function IsiKurikulum({
         <Kurikulum
           kelas={kelas}
           progres={progres}
+          modulTuntas={modulTuntas}
           modeBaca={aksesPenuh ? 'semua' : 'gratis-saja'}
           slugAktif={materiAktif}
           ringkas
@@ -80,8 +83,16 @@ export default async function HalamanPelajaran({
   if (!materi) notFound()
 
   const pengguna = await penggunaAktif()
-  const aksesPenuh = pengguna ? await punyaAkses(kelas.slug) : false
-  const progres = pengguna ? await progresKelas(kelas.slug) : new Set<string>()
+  const [aksesPenuh, progres, ringkasanKuis] = await Promise.all([
+    pengguna ? punyaAkses(kelas.slug) : Promise.resolve(false),
+    pengguna ? progresKelas(kelas.slug) : Promise.resolve(new Set<string>()),
+    pengguna ? rekapKuis(kelas.slug) : Promise.resolve([]),
+  ])
+  const modulTuntas = hitungModulTuntas(
+    kelas,
+    progres,
+    ringkasanKuis.filter((kuis) => kuis.lulus === true).map((kuis) => kuis.modul),
+  )
   const { sebelumnya, berikutnya, indeks, total } = tetangga(kelas, materi)
   const terkunci = materi.akses === 'berbayar' && !aksesPenuh
   const totalBisaDibaca = aksesPenuh ? total : kelas.jumlahGratis
@@ -119,7 +130,7 @@ export default async function HalamanPelajaran({
           <span className="mono text-xs text-hijau-gelap">LIHAT</span>
         </summary>
         <div className="border-t border-tepian p-3">
-          <IsiKurikulum kelas={kelas} progres={progres} aksesPenuh={aksesPenuh} materiAktif={materi.jalur} tampilkanKuis={Boolean(pengguna)} />
+          <IsiKurikulum kelas={kelas} progres={progres} modulTuntas={modulTuntas} aksesPenuh={aksesPenuh} materiAktif={materi.jalur} tampilkanKuis={Boolean(pengguna)} />
         </div>
       </details>
 
@@ -129,7 +140,7 @@ export default async function HalamanPelajaran({
             <span className="kicker text-hijau">KELAS / KEMBALI</span>
             <span className="mt-1 flex items-center justify-between gap-2 text-sm font-semibold">{kelas.judul}<span aria-hidden="true">↗</span></span>
           </Link>
-          <IsiKurikulum kelas={kelas} progres={progres} aksesPenuh={aksesPenuh} materiAktif={materi.jalur} tampilkanKuis={Boolean(pengguna)} />
+          <IsiKurikulum kelas={kelas} progres={progres} modulTuntas={modulTuntas} aksesPenuh={aksesPenuh} materiAktif={materi.jalur} tampilkanKuis={Boolean(pengguna)} />
         </aside>
 
         <article className="min-w-0 rounded-2xl border border-tepian bg-panel p-5 shadow-[var(--shadow-card)] sm:p-8 lg:p-10">

@@ -23,6 +23,15 @@ function lapor(ok, pesan) {
   if (!ok) gagal++
 }
 
+async function sebagaiAuthenticated(jalankan) {
+  await db.exec('set role authenticated')
+  try {
+    return await jalankan()
+  } finally {
+    await db.exec('reset role')
+  }
+}
+
 // ── Tiruan lingkungan Supabase ───────────────────────────────
 // Peran Supabase — supaya REVOKE/GRANT di migrasi benar-benar teruji
 await db.exec(`do $$ begin create role anon nologin; exception when duplicate_object then null; end $$;`)
@@ -66,7 +75,13 @@ const fungsi = await db.query(`
   select p.proname from pg_proc p join pg_namespace n on n.oid=p.pronamespace
   where n.nspname='public' order by 1
 `)
-console.log(`Fungsi RPC: ${fungsi.rows.map((r) => r.proname).join(', ')}`)
+console.log(`Fungsi schema public: ${fungsi.rows.map((r) => r.proname).join(', ')}`)
+const hakHelper = await db.query(`
+  select has_function_privilege('authenticated', p.oid, 'EXECUTE') as boleh
+  from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+  where n.nspname='public' and p.proname='catat_modul_tuntas'
+`)
+lapor(hakHelper.rows.length === 1 && hakHelper.rows[0].boleh === false, 'helper modul_tuntas tidak bisa dipanggil langsung oleh authenticated')
 
 // ── Uji data: seed ───────────────────────────────────────────
 const kursus = await db.query(`select id, slug, status, harga, estimasi_jam from courses`)
@@ -109,14 +124,14 @@ lapor(profil.rows[0]?.nama === 'Siswa Uji', `nama dari metadata: ${profil.rows[0
 
 // Progres: materi gratis boleh, berbayar tidak
 try {
-  await db.exec(`select tandai_selesai('ai-agent-self-host', 'fondasi/kenapa-self-host', true)`)
+  await sebagaiAuthenticated(() => db.exec(`select tandai_selesai('ai-agent-self-host', 'fondasi/kenapa-self-host', true)`))
   lapor(true, 'tandai selesai materi gratis diterima')
 } catch (e) {
   lapor(false, `tandai selesai gratis: ${e.message}`)
 }
 
 try {
-  await db.exec(`select tandai_selesai('ai-agent-self-host', 'produksi/guardrails', true)`)
+  await sebagaiAuthenticated(() => db.exec(`select tandai_selesai('ai-agent-self-host', 'produksi/guardrails', true)`))
   lapor(false, 'materi berbayar seharusnya ditolak')
 } catch {
   lapor(true, 'materi berbayar ditolak sebelum pembelian')
@@ -141,7 +156,7 @@ lapor(
 )
 
 try {
-  await db.exec(`select tandai_selesai('ai-agent-self-host', 'produksi/guardrails', true)`)
+  await sebagaiAuthenticated(() => db.exec(`select tandai_selesai('ai-agent-self-host', 'produksi/guardrails', true)`))
   lapor(true, 'materi berbayar bisa diselesaikan setelah bayar')
 } catch (e) {
   lapor(false, `setelah bayar: ${e.message}`)
@@ -155,9 +170,15 @@ lapor(jumlahEnroll.rows[0].jml === 1, 'webhook idempoten (tidak menggandakan enr
 // ── Uji kuis (kalau migrasinya ada) ──────────────────────────
 const adaKuis = fungsi.rows.some((r) => r.proname === 'nilai_kuis')
 if (adaKuis) {
-  const kuis = await db.query(`select id from quizzes limit 1`)
+  const kuis = await db.query(`
+    select q.id
+    from quizzes q
+    join modules m on m.id = q.module_id
+    where m.slug = 'fondasi'
+    limit 1
+  `)
   if (kuis.rows.length) {
-    const soal = await db.query(`select * from kuis_modul('ai-agent-self-host', 'fondasi')`)
+    const soal = await sebagaiAuthenticated(() => db.query(`select * from kuis_modul('ai-agent-self-host', 'fondasi')`))
     lapor(soal.rows.length > 0, `kuis_modul mengembalikan ${soal.rows.length} soal`)
 
     // Bank soal harus sepadan dengan materi: setiap modul berisi kuis,
@@ -186,10 +207,48 @@ if (adaKuis) {
     const kunci = await db.query(`select id, kunci from questions where quiz_id='${kuis.rows[0].id}'`)
     const jawaban = {}
     for (const k of kunci.rows) jawaban[k.id] = k.kunci.jawaban
-    const hasil = await db.query(`select * from nilai_kuis($1, $2)`, [kuis.rows[0].id, JSON.stringify(jawaban)])
+    const hasil = await sebagaiAuthenticated(() => db.query(`select * from nilai_kuis($1, $2)`, [kuis.rows[0].id, JSON.stringify(jawaban)]))
     lapor(hasil.rows[0]?.nilai === 100, `nilai kuis sempurna: ${hasil.rows[0]?.nilai}`)
-    const ulang = await db.query(`select * from nilai_kuis($1, $2)`, [kuis.rows[0].id, JSON.stringify(jawaban)])
+    const ulang = await sebagaiAuthenticated(() => db.query(`select * from nilai_kuis($1, $2)`, [kuis.rows[0].id, JSON.stringify(jawaban)]))
     lapor(ulang.rows[0]?.percobaan >= 2, `percobaan tercatat: ${ulang.rows[0]?.percobaan}`)
+
+    const eventFondasi = `
+      select count(*)::int jml from events
+      where user_id='${UID}' and nama='modul_tuntas'
+        and properti->>'slug'='ai-agent-self-host'
+        and properti->>'modul'='fondasi'
+    `
+    const sebelumPelajaranTerakhir = await db.query(eventFondasi)
+    lapor(sebelumPelajaranTerakhir.rows[0].jml === 0, 'kuis lulus saja belum menuntaskan modul yang pelajarannya belum lengkap')
+
+    // Urutan 1: kuis lulus lebih dahulu, pelajaran terakhir diselesaikan belakangan.
+    await sebagaiAuthenticated(() => db.exec(`select tandai_selesai('ai-agent-self-host', 'fondasi/ollama-101', true)`))
+    const setelahPelajaranTerakhir = await db.query(eventFondasi)
+    lapor(setelahPelajaranTerakhir.rows[0].jml === 1, 'pelajaran terakhir mencatat modul tuntas jika kuis sudah lulus')
+
+    await sebagaiAuthenticated(() => db.exec(`select tandai_selesai('ai-agent-self-host', 'fondasi/ollama-101', true)`))
+    await sebagaiAuthenticated(() => db.query(`select * from nilai_kuis($1, $2)`, [kuis.rows[0].id, JSON.stringify(jawaban)]))
+    const setelahPercobaanUlang = await db.query(eventFondasi)
+    lapor(setelahPercobaanUlang.rows[0].jml === 1, 'event modul tuntas idempoten setelah klik/percobaan berulang')
+
+    // Urutan 2: semua pelajaran selesai lebih dahulu, baru kuis diluluskan.
+    await sebagaiAuthenticated(() => db.exec(`select tandai_selesai('ai-agent-self-host', 'agent-pertama/tool-calling', true)`))
+    await sebagaiAuthenticated(() => db.exec(`select tandai_selesai('ai-agent-self-host', 'agent-pertama/byok-keamanan', true)`))
+    const kuisAgent = await db.query(`
+      select q.id from quizzes q join modules m on m.id=q.module_id
+      where m.slug='agent-pertama' limit 1
+    `)
+    const kunciAgent = await db.query(`select id, kunci from questions where quiz_id=$1`, [kuisAgent.rows[0]?.id])
+    const jawabanAgent = Object.fromEntries(kunciAgent.rows.map((k) => [k.id, k.kunci.jawaban]))
+    const hasilAgent = await sebagaiAuthenticated(() => db.query(`select * from nilai_kuis($1, $2)`, [kuisAgent.rows[0]?.id, JSON.stringify(jawabanAgent)]))
+    lapor(hasilAgent.rows[0]?.lulus === true, 'kuis lulus setelah pelajaran lengkap')
+    const eventAgent = await db.query(`
+      select count(*)::int jml from events
+      where user_id='${UID}' and nama='modul_tuntas'
+        and properti->>'slug'='ai-agent-self-host'
+        and properti->>'modul'='agent-pertama'
+    `)
+    lapor(eventAgent.rows[0].jml === 1, 'kuis mencatat modul tuntas jika pelajaran sudah lengkap')
   } else {
     lapor(false, 'belum ada soal tersemat')
   }

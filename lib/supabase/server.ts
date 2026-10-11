@@ -1,4 +1,5 @@
 import 'server-only'
+import { cache } from 'react'
 import { cookies } from 'next/headers'
 import { createServerClient } from '@supabase/ssr'
 import { SUPABASE_ANON_KEY, SUPABASE_URL, SUPABASE_AKTIF } from './konfigurasi'
@@ -32,7 +33,7 @@ export interface Pengguna {
 }
 
 /** Ambil pengguna login + profilnya. null kalau belum login atau mode demo. */
-export async function penggunaAktif(): Promise<Pengguna | null> {
+export const penggunaAktif = cache(async (): Promise<Pengguna | null> => {
   const sb = await klienServer()
   if (!sb) return null
   const { data } = await sb.auth.getUser()
@@ -48,7 +49,7 @@ export async function penggunaAktif(): Promise<Pengguna | null> {
     nama: profil?.nama ?? null,
     peran: (profil?.peran as Pengguna['peran']) ?? 'siswa',
   }
-}
+})
 
 /**
  * Apakah pengguna memiliki kelas ini (enrollment aktif).

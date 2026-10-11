@@ -31,6 +31,9 @@ Penanggung jawab:
 | T-16 | Uji pindai QR dari sertifikat yang sudah dicetak/dibuka di layar | Kamu | ⏸ TERTUNDA — butuh kamera |
 | T-17 | SMTP produksi untuk magic link Supabase Auth | Kamu + Hermes | ⏸ TERTUNDA — butuh akun Resend |
 | T-18 | Uji visual UI/UX responsif & keyboard pada browser nyata | Kamu + Hermes | ⏸ TERTUNDA — perlu persetujuan visual dan perangkat nyata |
+| T-19 | Terapkan 0007 dan uji sesi/progres Google end-to-end | Hermes + Kamu | ⏸ TERTUNDA — butuh project Supabase, sesi Google, dan deploy yang disetujui |
+| T-20 | Pastikan repo GitHub kembali private | Kamu + Hermes | ⏸ TERTUNDA — akses pemilik repo; pembukaan sebelumnya hanya sementara |
+| T-21 | Tutup audit lisensi skill sebelum distribusi publik | Kamu + Hermes | ⏸ TERTUNDA — beberapa upstream tidak menyertakan lisensi/atribusi lengkap |
 
 ---
 
@@ -43,7 +46,9 @@ Penanggung jawab:
 
 ### T-02 · Jalankan migrasi ke Supabase
 **Kenapa tertunda:** butuh koneksi ke project nyata. (Sebagai kompensasi, migrasi sudah diuji secara lokal memakai PGlite — lihat `npm run db:uji`.)
-**Langkah:** jalankan `0001_init.sql` → `0002_rls.sql` → `0003_seed.sql` → `0004_kuis.sql` → `0005_sertifikat.sql` → `0006_bank_soal.sql` di SQL Editor, berurutan. Verifikasi: 12 pelajaran, 23 soal, 15 fungsi RPC; `estimasi_jam=15`; jumlah `lessons.menit=915` (termasuk proyek akhir 600 menit). `0003_seed.sql` sudah diselaraskan ke metadata materi dan urutan Produksi.
+**Riwayat:** project produksi sudah menerima `0001_init.sql`–`0006_bank_soal.sql` pada 11 Okt 2026. Jangan jalankan ulang berkas tersebut.
+**Langkah untuk project baru:** jalankan `0001_init.sql` → `0002_rls.sql` → `0003_seed.sql` → `0004_kuis.sql` → `0005_sertifikat.sql` → `0006_bank_soal.sql` → `0007_progres_modul.sql` secara berurutan. Untuk project yang sudah ada, `0007` saja diterapkan sebagai hotfix pada T-19.
+**Verifikasi:** 12 pelajaran, 23 soal, 15 RPC publik + 1 helper internal; `estimasi_jam=15`; jumlah `lessons.menit=915` (termasuk proyek akhir 600 menit). `0003_seed.sql` sudah diselaraskan ke metadata materi dan urutan Produksi.
 
 ### T-03 · Aktifkan OAuth GitHub & Google
 **Kenapa tertunda:** butuh persetujuan akun OAuth dan pendaftaran aplikasi di GitHub/Google.
@@ -163,3 +168,21 @@ Jalankan berurutan dan catat keluarannya apa adanya. Yang perlu dilaporkan bukan
 **Penanggung jawab:** Kamu menilai arah visual dan menyetujui hasil; Hermes menjalankan pemeriksaan pada repo lokal/staging dan membenahi regresi yang ditemukan.
 **Langkah persis:** (1) jalankan `npm run dev` dengan Node 22, atau buka preview dari cabang kerja sebelum merge; (2) periksa `/`, `/kelas`, `/kelas/ai-agent-self-host`, `/harga`, `/masuk`, `/dashboard`, satu pelajaran gratis, satu pelajaran premium saat belum login, `/kuis/ai-agent-self-host/fondasi`, dan `/verify`; (3) ulangi sekurangnya pada lebar 1440 px dan 390 px; (4) di desktop, navigasikan header, form email, radio kuis, dan semua CTA memakai Tab/Shift+Tab/Enter; di ponsel, buka/tutup menu serta accordion kurikulum; (5) pastikan halaman belajar premium tanpa entitlement hanya menampilkan ringkasan—bukan isi MDX; (6) laporkan overflow, fokus yang hilang, teks/kontras yang sulit dibaca, atau transisi yang membingungkan sebelum merge.
 **Catatan integrasi:** login provider/magic link, checkout Midtrans, webhook settlement, dan penerbitan sertifikat live tetap mengikuti T-03, T-04, T-09, T-13, dan T-17; semuanya memerlukan kredensial/perangkat pemilik dan jangan diuji dengan rahasia produksi di sandbox.
+
+---
+
+### T-19 · Terapkan perbaikan progres dan uji sesi Google end-to-end
+**Kenapa tertunda:** sandbox tidak memiliki sesi akun Google pemilik atau izin untuk mengubah database/deploy produksi. Kode lokal sudah diperbaiki dan migrasi `0007_progres_modul.sql` sudah disiapkan, tetapi belum dijalankan ke project Supabase.
+**Penanggung jawab:** Hermes menjalankan tes lokal dan menerapkan migrasi setelah persetujuan pemilik; Kamu melakukan login Google dan memeriksa alur akun/progres di staging atau live.
+**Langkah persis:** (1) Hermes memastikan Node 22, menjalankan `npm ci`, `npm run verifikasi`, lalu `npm run build`; (2) pastikan project Supabase yang dipilih memang `kelas-niumination` dan sudah memiliki migrasi `0001`–`0006`; (3) backup sesuai prosedur project, periksa bahwa `0007_progres_modul.sql` belum diterapkan, lalu jalankan **berkas 0007 saja** di SQL Editor — jangan mengulang 0001–0006; (4) deploy perubahan hanya setelah pemilik menyetujui push/deploy; (5) Kamu masuk dengan Google, pastikan header menampilkan akun dan tombol Keluar pada halaman materi serta kuis, lalu hard-refresh dan buka pelajaran lain; (6) tandai satu pelajaran selesai, muat ulang, pindah halaman, dan periksa centang/progres di dashboard; (7) uji dua urutan modul: lulus kuis sebelum menyelesaikan semua pelajaran, kemudian tandai pelajaran terakhir; dan menyelesaikan semua pelajaran lebih dulu lalu lulus kuis; (8) pastikan keduanya menampilkan status “Modul tuntas” dan satu event `modul_tuntas` tersimpan, tanpa duplikasi; (9) uji halaman materi premium tanpa enrollment agar tetap terkunci.
+**Jika gagal:** catat URL, waktu, teks error, status HTTP, dan nama request yang gagal dari DevTools. Sensor email, cookie, token, anon key, dan semua rahasia sebelum mengirim laporan. Jangan mengirim tangkapan Network yang memuat cookie/token.
+
+### T-20 · Kembalikan repository menjadi private
+**Kenapa tertunda:** perubahan visibility hanya dapat dilakukan oleh pemilik repo atau operator yang mendapat otorisasi. Repo `Niumination/kelas` dibuka sementara hanya untuk fetch; tidak ada izin untuk membiarkannya publik.
+**Penanggung jawab:** Kamu (pemilik GitHub); Hermes membantu memverifikasi jika diminta.
+**Langkah persis:** buka `github.com/Niumination/kelas` → **Settings → General → Danger Zone → Change repository visibility → Make private**; konfirmasi nama repo jika diminta; lalu buka URL repo di jendela privat tanpa login dan pastikan akses anonim ditolak. Jangan push materi atau perubahan baru sebelum status private dikonfirmasi.
+
+### T-21 · Selesaikan lisensi skill sebelum distribusi publik
+**Kenapa tertunda:** beberapa skill dari tiga sumber belum memberikan seluruh bukti lisensi/atribusi yang dibutuhkan di repo lokal; rinciannya ada di `docs/THIRD-PARTY-NOTICES.md`.
+**Penanggung jawab:** Hermes menghubungi/mengecek sumber dan menyiapkan penggantian jika perlu; Kamu menyetujui distribusi.
+**Langkah persis:** (1) konfirmasi lisensi dan notice untuk `next-best-practices`, `next-cache-components`, `next-upgrade`; (2) konfirmasi notice hak cipta untuk `composition-patterns` dan `react-best-practices`; (3) identifikasi sumber/penulis asli `nodejs-best-practices` yang berlabel community dan verifikasi atribusi CC BY 4.0; (4) jika bukti tidak tersedia, hapus skill terkait dari paket yang akan dipublikasikan atau gantikan dengan dokumentasi resmi berlisensi jelas; (5) perbarui `docs/THIRD-PARTY-NOTICES.md` dan lock manifest sesuai perubahan. Jangan mengubah `LICENSE` MIT aplikasi untuk mengklaim hak atas materi pihak ketiga.

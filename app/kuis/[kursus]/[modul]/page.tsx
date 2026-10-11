@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
-import { ambilKelas } from '@/lib/kurikulum'
-import { penggunaAktif, ambilKuisModul } from '@/lib/supabase/server'
+import { ambilKelas, hitungModulTuntas } from '@/lib/kurikulum'
+import { penggunaAktif, ambilKuisModul, progresKelas, rekapKuis } from '@/lib/supabase/server'
 import { FormKuis } from '@/components/FormKuis'
 import { TombolBeli } from '@/components/TombolBeli'
 import { CatatanDemo } from '@/components/CatatanDemo'
@@ -51,7 +51,19 @@ export default async function HalamanKuis({
     )
   }
 
-  const { kuis, error } = await ambilKuisModul(kursus, modul)
+  const [{ kuis, error }, progres, ringkasanKuis] = await Promise.all([
+    ambilKuisModul(kursus, modul),
+    progresKelas(kursus),
+    rekapKuis(kursus),
+  ])
+  const modulTuntas = hitungModulTuntas(
+    kelas,
+    progres,
+    ringkasanKuis.filter((item) => item.lulus === true).map((item) => item.modul),
+  ).has(metaModul.slug)
+  const kuisLulus = ringkasanKuis.some((item) => item.modul === metaModul.slug && item.lulus === true)
+  const pelajaranTersisa = metaModul.pelajaran.filter((item) => !progres.has(item.jalur))
+  const pelajaranSelesai = metaModul.pelajaran.length - pelajaranTersisa.length
   const butuhAkses = metaModul.akses === 'berbayar'
   const pelajaranPertama = metaModul.pelajaran[0]
 
@@ -77,6 +89,45 @@ export default async function HalamanKuis({
           </div>
         </div>
       </header>
+
+      {!error && (
+        <section
+          role="status"
+          aria-live="polite"
+          className={`mx-auto mt-5 max-w-3xl rounded-2xl border p-4 sm:p-5 ${modulTuntas ? 'border-hijau/20 bg-hijau/5' : 'border-tepian bg-panel'}`}
+        >
+          <div className="flex items-start gap-3">
+            <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-full ${modulTuntas ? 'bg-hijau/10 text-hijau-gelap' : 'bg-panel-2 text-redup'}`} aria-hidden="true">
+              {modulTuntas ? '✓' : '○'}
+            </span>
+            <div className="min-w-0">
+              <p className={`kicker ${modulTuntas ? 'text-hijau-gelap' : 'text-redup'}`}>
+                {modulTuntas ? 'MODUL TUNTAS' : 'PROGRES MODUL'}
+              </p>
+              <p className="mt-1 text-sm leading-6 text-redup">
+                {modulTuntas
+                  ? 'Semua pelajaran modul ini selesai dan kuis lulus. Progres modul sudah tercatat di akunmu.'
+                  : kuisLulus && pelajaranTersisa.length > 0
+                    ? `Kuis sudah lulus. Tandai ${pelajaranTersisa.length} pelajaran yang tersisa sebagai selesai agar modul tuntas.`
+                    : pelajaranTersisa.length === 0
+                      ? 'Semua pelajaran sudah selesai. Lulus kuis ini untuk menuntaskan modul.'
+                      : `Pelajaran selesai: ${pelajaranSelesai}/${metaModul.pelajaran.length}. Selesaikan semuanya dan lulus kuis agar modul tuntas.`}
+              </p>
+              {pelajaranTersisa.length > 0 && (
+                <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-2">
+                  {pelajaranTersisa.map((pelajaran) => (
+                    <li key={pelajaran.jalur}>
+                      <Link href={`/belajar/${kelas.slug}/${pelajaran.jalur}`} className="text-xs font-semibold text-hijau-gelap underline decoration-hijau/30 underline-offset-4 hover:decoration-hijau">
+                        {pelajaran.judul} →
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        </section>
+      )}
 
       {error ? (
         <div className="mx-auto mt-8 max-w-3xl rounded-2xl border border-kuning/20 bg-kuning/5 p-5 sm:p-7">

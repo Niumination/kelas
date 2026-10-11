@@ -1,7 +1,8 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useEffect, useState, useTransition } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { tandaiSelesai } from '@/app/aksi'
 
 interface Props {
@@ -15,7 +16,12 @@ export function TombolSelesai({ slugKelas, jalur, awalSelesai, aktif }: Props) {
   const [selesai, setSelesai] = useState(awalSelesai)
   const [pesan, setPesan] = useState<string | null>(null)
   const [menunggu, mulai] = useTransition()
+  const router = useRouter()
   const tujuan = `/belajar/${slugKelas}/${jalur}`
+
+  useEffect(() => {
+    setSelesai(awalSelesai)
+  }, [awalSelesai])
 
   if (!aktif) {
     return (
@@ -38,7 +44,9 @@ export function TombolSelesai({ slugKelas, jalur, awalSelesai, aktif }: Props) {
         if (!hasil.ok) {
           setSelesai(!nilai)
           setPesan(hasil.pesan ?? 'Progres belum tersimpan. Coba lagi.')
+          return
         }
+        router.refresh()
       } catch {
         setSelesai(!nilai)
         setPesan('Koneksi bermasalah. Periksa sambungan lalu coba lagi.')
@@ -53,6 +61,7 @@ export function TombolSelesai({ slugKelas, jalur, awalSelesai, aktif }: Props) {
         onClick={klik}
         disabled={menunggu}
         aria-pressed={selesai}
+        aria-busy={menunggu}
         className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border px-4 text-sm font-semibold transition-colors disabled:cursor-wait disabled:opacity-60 ${
           selesai
             ? 'border-hijau/20 bg-hijau/10 text-hijau-gelap hover:bg-hijau/15'
@@ -61,7 +70,7 @@ export function TombolSelesai({ slugKelas, jalur, awalSelesai, aktif }: Props) {
       >
         {menunggu ? 'Menyimpan…' : selesai ? '✓ Pelajaran selesai' : 'Tandai selesai'}
       </button>
-      {pesan && <span role="status" className="text-xs text-merah">{pesan}</span>}
+      {pesan && <span role="alert" className="text-xs text-merah">{pesan}</span>}
     </div>
   )
 }

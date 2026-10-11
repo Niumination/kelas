@@ -33,7 +33,7 @@ Siapkan proyek yang ada di direktori kerja ini untuk berjalan di GitHub, Supabas
 5. Setelah tiap fase, perbarui kotak centang di `docs/hermes/TUGAS.md` dan tulis laporan di `docs/hermes/LAPORAN.md`.
 6. Salin keluaran error apa adanya. Jika migrasi, build, CI, atau transaksi gagal, berhenti dan laporkan — jangan menonaktifkan tes, mengubah data produksi, atau menebak perbaikan berisiko.
 7. Jangan pernah menuliskan credential/token/API key ke kode, Git, issue, atau laporan. `SUPABASE_SERVICE_ROLE_KEY` hanya untuk skrip uji lokal; jangan memasangnya di Vercel. Jangan pernah `git push --force` ke `main`.
-8. Jangan mengedit migrasi yang sudah dijalankan. Perubahan skema baru harus berupa migrasi baru `0007_*.sql` dan seterusnya.
+8. Jangan mengedit migrasi yang sudah dijalankan. Perubahan skema baru setelah perbaikan sesi/progres ini harus berupa migrasi baru `0008_*.sql` dan seterusnya.
 
 ## Mulai
 
