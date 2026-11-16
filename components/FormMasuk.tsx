@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { toast } from 'sonner'
 import { klienBrowser } from '@/lib/supabase/client'
 import { SITE_URL } from '@/lib/supabase/konfigurasi'
 
@@ -31,21 +32,19 @@ function IkonGoogle() {
 export function FormMasuk({ aktif, lanjut }: Props) {
   const [email, setEmail] = useState('')
   const [tahap, setTahap] = useState<'diam' | 'memuat' | 'terkirim'>('diam')
-  const [pesan, setPesan] = useState('')
 
   const redirectTo = `${SITE_URL}/auth/callback?lanjut=${encodeURIComponent(lanjut)}`
 
   async function oauth(penyedia: 'github' | 'google') {
     const sb = klienBrowser()
     if (!sb) {
-      setPesan('Login belum bisa dimulai. Muat ulang halaman atau coba lagi nanti.')
+      toast.error('Login belum bisa dimulai. Muat ulang halaman atau coba lagi nanti.')
       return
     }
     setTahap('memuat')
-    setPesan('')
     const { error } = await sb.auth.signInWithOAuth({ provider: penyedia, options: { redirectTo } })
     if (error) {
-      setPesan(error.message)
+      toast.error(error.message)
       setTahap('diam')
     }
   }
@@ -54,17 +53,16 @@ export function FormMasuk({ aktif, lanjut }: Props) {
     event.preventDefault()
     const sb = klienBrowser()
     if (!sb) {
-      setPesan('Login belum bisa dimulai. Muat ulang halaman atau coba lagi nanti.')
+      toast.error('Login belum bisa dimulai. Muat ulang halaman atau coba lagi nanti.')
       return
     }
     setTahap('memuat')
-    setPesan('')
     const { error } = await sb.auth.signInWithOtp({
       email,
       options: { emailRedirectTo: redirectTo },
     })
     if (error) {
-      setPesan(error.message)
+      toast.error(error.message)
       setTahap('diam')
     } else {
       setTahap('terkirim')
@@ -141,7 +139,6 @@ export function FormMasuk({ aktif, lanjut }: Props) {
         </button>
       </form>
 
-      {pesan && <p role="alert" className="mt-4 rounded-lg border border-merah/20 bg-merah/5 px-3 py-2 text-xs leading-5 text-merah">{pesan}</p>}
       <p className="mt-4 text-xs leading-5 text-redup">Tanpa kata sandi. Kami hanya menyimpan data akun dan progres yang diperlukan untuk kelas.</p>
     </div>
   )

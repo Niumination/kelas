@@ -561,3 +561,17 @@ a {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Sonner — samakan toast dengan token desain kelas */
+[data-sonner-toaster] {
+  --normal-bg: var(--color-panel);
+  --normal-text: var(--color-teks);
+  --normal-border: var(--color-tepian);
+  --success-bg: var(--color-panel);
+  --success-text: var(--color-hijau);
+  --success-border: var(--color-hijau);
+  --error-bg: var(--color-panel);
+  --error-text: var(--color-merah);
+  --error-border: var(--color-merah);
+  font-family: var(--font-sans);
+}
